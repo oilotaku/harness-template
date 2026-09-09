@@ -2,6 +2,7 @@
   "$comment": "範例設定：實際欄位請依你使用的 Claude Code 版本文件調整",
   "permissions": {
     "allow": [
+      "Bash(python3 scripts/init.py)",
       "Bash(python3 scripts/machine-profile.py)",
       "Bash(python3 scripts/service-scan.py)",
       "Bash(python3 scripts/env-guard.py)",

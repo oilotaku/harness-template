@@ -1,2 +1,6 @@
 __pycache__/
 *.pyc
+
+# 每台機器/每次任務的本機狀態（環境指紋、鎖定的公開測試清單），
+# 不應該被提交進 repo——見 scripts/env-guard.py、scripts/lock-tests.py。
+.harness/
