@@ -4,9 +4,11 @@
 """
 import os
 import platform
+import re
 import shutil
 import socket
 import subprocess
+from pathlib import Path
 
 
 def get_memory_mb():
@@ -59,17 +61,63 @@ def get_memory_mb():
 
 
 def get_gpu_info():
+    """依序嘗試 nvidia-smi → lspci → /dev/dri → macOS system_profiler。
+    只認 nvidia-smi 會漏掉 AMD/Intel/Apple/樹莓派 V3D 等 GPU，讓 Orchestrator
+    誤以為機器完全沒有 GPU，因此加上非 NVIDIA 的 fallback 判斷。"""
     nvidia_smi = shutil.which("nvidia-smi")
-    if not nvidia_smi:
-        return None
-    try:
-        out = subprocess.check_output(
-            [nvidia_smi, "--query-gpu=name,memory.total", "--format=csv,noheader"],
-            text=True,
-        )
-        return out.strip() or None
-    except Exception:
-        return None
+    if nvidia_smi:
+        try:
+            out = subprocess.check_output(
+                [nvidia_smi, "--query-gpu=name,memory.total", "--format=csv,noheader"],
+                text=True,
+            )
+            if out.strip():
+                return out.strip()
+        except Exception:
+            pass
+
+    system = platform.system()
+
+    if system == "Linux":
+        lspci = shutil.which("lspci")
+        if lspci:
+            try:
+                out = subprocess.check_output([lspci], text=True)
+                gpu_lines = [
+                    line.split(": ", 1)[1] if ": " in line else line
+                    for line in out.splitlines()
+                    if re.search(r"VGA compatible controller|3D controller|Display controller", line)
+                ]
+                if gpu_lines:
+                    return "; ".join(gpu_lines) + "（廠牌由 lspci 判斷，非 NVIDIA 專屬偵測）"
+            except Exception:
+                pass
+
+        dri_dir = Path("/dev/dri")
+        try:
+            if dri_dir.is_dir() and any(dri_dir.iterdir()):
+                return "偵測到 /dev/dri render node，存在 GPU/顯示裝置但廠牌未知（lspci 不可用）"
+        except OSError:
+            pass
+
+    elif system == "Darwin":
+        profiler = shutil.which("system_profiler")
+        if profiler:
+            try:
+                out = subprocess.check_output(
+                    [profiler, "SPDisplaysDataType"], text=True, timeout=10
+                )
+                names = [
+                    line.split(":", 1)[1].strip()
+                    for line in out.splitlines()
+                    if "Chipset Model:" in line
+                ]
+                if names:
+                    return "; ".join(names)
+            except Exception:
+                pass
+
+    return None
 
 
 def get_container_hint():
@@ -106,7 +154,7 @@ def main():
     )
 
     gpu = get_gpu_info()
-    print(f"GPU：{gpu}" if gpu else "GPU：未偵測到 NVIDIA GPU（或不適用）")
+    print(f"GPU：{gpu}" if gpu else "GPU：未偵測到（或本腳本尚不支援辨識此裝置的廠牌）")
 
     print(f"是否在容器環境中：{get_container_hint()}")
 

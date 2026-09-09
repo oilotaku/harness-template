@@ -26,6 +26,10 @@ tools: Read, Edit, Write, Glob, Grep, Bash
    不要加沒被要求的功能、不要改動不在範圍內的檔案。
 5. 遇到 task-spec 有歧義、或跟現有程式碼庫衝突，**先回報 Orchestrator 提問**，
    不要自己猜一個答案就繼續寫。
+6. **停損規則**：如果同一條驗收標準連續失敗 ≥3 次，或發現非得修改
+   task-spec 範圍外的檔案才能通過，**必須停止並回報 Orchestrator「blocked」
+   及具體原因**，不可以自行放寬邏輯、跳過測試、或擴大修改範圍來硬過關。
+   是否修正 task-spec 或重新指派，由 Orchestrator 判斷。
 
 ## 工作流程
 

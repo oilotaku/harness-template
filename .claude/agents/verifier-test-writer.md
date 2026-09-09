@@ -42,6 +42,14 @@ tools: Read, Write, Edit, Glob, Grep, Bash
 3. 一份「驗收標準對照表」：每條 task-spec 的驗收標準對應到哪些測試案例，
    確保沒有遺漏的驗收標準
 
+## 完成公開測試後，必須執行鎖定腳本
+
+寫完 `tests/public/` 底下的檔案後，**執行 `python3 scripts/lock-tests.py`**，
+把這些檔案的路徑寫入 `.harness/locked-tests.list`。這是 implementer 之後
+不能修改公開測試的技術強制力來源（由 `guard-hidden-tests.py` 這個
+PreToolUse hook 讀取比對），只在文件裡寫「要鎖定」而沒有實際執行這支腳本，
+等於沒有鎖定。
+
 ## 禁止事項
 
 - 禁止在測試中洩漏「標準答案的具體實作方式」（測試該驗證行為，而不是強迫用某種寫法實作）。

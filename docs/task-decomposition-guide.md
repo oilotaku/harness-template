@@ -30,7 +30,18 @@
  └─ 依 docs/model-thinking-matrix.md 標註模型/思考層級
 ```
 
-## 4. 什麼時候不該拆更細
+## 4. blocked 任務的處理原則
+
+implementer 依 `implementer-generic.md` 的停損規則回報 `blocked` 時
+（同一條驗收標準連續失敗 ≥3 次，或需要修改範圍外的檔案），
+**不可以把該 task 原樣重派給同一個或另一個 implementer session 重試**，
+必須先由 Orchestrator 判斷根因——通常是 task-spec 本身描述不清、
+驗收標準與實際情況矛盾，或拆分粒度有問題——修正 task-spec
+（或視情況重新指派 verifier-test-writer 修正測試）之後才能重新派工。
+原樣重派等於把「規格不清楚」的問題丟給 implementer 自己猜，
+違反黃金法則第 7 條。
+
+## 5. 什麼時候不該拆更細
 
 如果拆到「一個 task 小到沒有獨立驗收意義」（例如把一個函式的三行邏輯拆成三個
 task），就是拆過頭了。經驗法則：一個 task 的實作時間如果讓一個具備該語言能力

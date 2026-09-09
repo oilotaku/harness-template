@@ -4,7 +4,8 @@
     "allow": [
       "Bash(python3 scripts/machine-profile.py)",
       "Bash(python3 scripts/service-scan.py)",
-      "Bash(python3 scripts/env-guard.py)"
+      "Bash(python3 scripts/env-guard.py)",
+      "Bash(python3 scripts/lock-tests.py)"
     ],
     "deny": [
       "Bash(rm -rf *)",
@@ -16,7 +17,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Edit|Write",
+        "matcher": "Edit|Write|Bash",
         "hooks": [
           {
             "type": "command",

@@ -42,7 +42,7 @@ def main() -> None:
 
     recorded = json.loads(FINGERPRINT_FILE.read_text(encoding="utf-8"))
     mismatches = []
-    for key, label in (("hostname", "主機名稱"), ("os", "作業系統")):
+    for key, label in (("hostname", "主機名稱"), ("os", "作業系統"), ("arch", "架構")):
         if recorded.get(key) != current.get(key):
             mismatches.append(
                 f"⚠️ {label}不符：記錄為「{recorded.get(key)}」，目前為「{current.get(key)}」"
