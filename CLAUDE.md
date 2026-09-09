@@ -50,6 +50,10 @@
    [Orchestrator] 彙整結果、產出驗收報告 (templates/verification-report-template.md)
 ```
 
+> 需求釐清（步驟 1）與任務拆解（步驟 4）之前，Orchestrator 應先查閱既有記憶；
+> 彙整（步驟 6 之後）若有值得留給下次的判斷依據，應寫入記憶。
+> 詳細規則見 `docs/memory-management.md`（§5. 記憶管理）。
+
 ---
 
 ## 2. 子智能體分類（必須二分，禁止混合職責）
@@ -89,3 +93,15 @@ harness-template/
 ├── docs/                         ← 方法論文件
 └── templates/                    ← task-spec 與驗收報告範本
 ```
+
+---
+
+## 5. 記憶管理（Memory）
+
+- Claude Code 有一套跨 session 的持久記憶機制（存在 repo 之外），
+  跟 `.harness/`（repo 內、每台機器/每次任務的當下狀態）性質不同，
+  用途是讓 Orchestrator 下次拆解同一個專案的任務時不用從零問起。
+- **只有 Orchestrator 可以寫記憶**；verifier 發現值得記錄的事要回報
+  Orchestrator 由它決定，implementer 完全不碰記憶。
+- 什麼時候該存、該存哪一種、什麼時候不該存，完整規則見
+  `docs/memory-management.md`，不在這裡重複。

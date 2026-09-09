@@ -12,13 +12,14 @@
 
 ## 快速開始
 
-1. 把 `harness-template/` 內容複製到你的專案根目錄。
-2. 先執行環境掃描：
+1. `git clone` 這個 repo（或把 `harness-template/` 內容複製到你的專案根目錄）。
+2. 執行初始化（依序跑機器效能掃描、既有服務掃描、環境指紋建立/比對三步）：
    ```bash
-   python3 scripts/machine-profile.py
-   python3 scripts/service-scan.py
-   python3 scripts/env-guard.py
+   python3 scripts/init.py
    ```
+   （等同手動依序執行 `scripts/machine-profile.py`、`scripts/service-scan.py`、
+   `scripts/env-guard.py` 這三支，合併成一個入口方便 `git pull` 後直接跑；
+   結果只會印出來，不會自動幫你做任何決定。）
 3. 在 Claude Code 中打開專案，讓 `Orchestrator`（見 `.claude/agents/orchestrator.md`）
    依 `docs/task-decomposition-guide.md` 拆解你的需求。
 4. 依照 `docs/implementer-verifier-workflow.md` 的順序執行：
@@ -31,8 +32,8 @@
 | `CLAUDE.md` | 全域規則（黃金法則、工作流程總覽） |
 | `.claude/agents/` | 子智能體定義（實作者 3 個、檢驗者 3 個） |
 | `.claude/commands/` | `/task-plan` `/task-dispatch` `/machine-check` 斜線指令 |
-| `scripts/` | 機器效能、既有服務、環境指紋掃描腳本 |
-| `docs/` | 任務拆解、模型/思考分配、實作/檢驗分離、多語言支援方法論 |
+| `scripts/` | `init.py`（一鍵初始化）+ 機器效能、既有服務、環境指紋掃描腳本 |
+| `docs/` | 任務拆解、模型/思考分配、實作/檢驗分離、多語言支援、記憶管理方法論 |
 | `templates/` | task-spec 與驗收報告範本 |
 
 ## 設計依據
