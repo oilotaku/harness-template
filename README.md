@@ -33,7 +33,7 @@
 | `.claude/agents/` | 子智能體定義（實作者 3 個、檢驗者 3 個） |
 | `.claude/commands/` | `/task-plan` `/task-dispatch` `/machine-check` 斜線指令 |
 | `scripts/` | `init.py`（一鍵初始化）+ 機器效能、既有服務、環境指紋掃描腳本 |
-| `docs/` | 任務拆解、模型/思考分配、實作/檢驗分離、多語言支援方法論 |
+| `docs/` | 任務拆解、模型/思考分配、實作/檢驗分離、多語言支援、記憶管理方法論 |
 | `templates/` | task-spec 與驗收報告範本 |
 
 ## 設計依據

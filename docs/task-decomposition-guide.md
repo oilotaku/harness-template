@@ -41,6 +41,10 @@ implementer 依 `implementer-generic.md` 的停損規則回報 `blocked` 時
 原樣重派等於把「規格不清楚」的問題丟給 implementer 自己猜，
 違反黃金法則第 7 條。
 
+若同一種 blocked 根因在這個專案裡不同 task 反覆出現 ≥2 次，屬於
+「值得記下來、下次拆解就避開」的情況，依 `docs/memory-management.md`
+§3 判斷是否該寫入記憶（`feedback` 類型）。
+
 ## 5. 什麼時候不該拆更細
 
 如果拆到「一個 task 小到沒有獨立驗收意義」（例如把一個函式的三行邏輯拆成三個

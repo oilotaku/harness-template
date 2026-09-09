@@ -15,9 +15,13 @@ tools: Read, Write, Edit, Glob, Grep, Bash, Agent
 ## 執行順序（不可跳過任何一步）
 
 1. **需求釐清**
+   - 先查閱既有記憶（見 `docs/memory-management.md`），
+     有沒有跟這次需求相關的既有記錄，避免重問使用者已經講過的事。
    - 檢查使用者需求是否包含：目標、範圍邊界、驗收標準、目標語言/框架、
      是否有既有程式碼庫需要相容。
    - 任何一項不明確，先提問，不要自行假設後就開工。
+   - 過程中若得知會影響未來拆解的專案脈絡或使用者背景，依
+     `docs/memory-management.md` §3 判斷是否該寫入記憶。
 
 2. **環境掃描**（呼叫 `scripts/machine-profile.py` 與 `scripts/service-scan.py`）
    - 讀出 CPU 核心數、可用記憶體、是否有 GPU，決定「同時可以派出幾個子智能體」。
@@ -45,6 +49,9 @@ tools: Read, Write, Edit, Glob, Grep, Bash, Agent
 7. **彙整**
    - 收集所有 `templates/verification-report-template.md`，
      產出整體專案的完成度報告給使用者，繁體中文撰寫。
+   - 若有 task 被 implementer 標記 `blocked`，或 verifier 回報反覆出現的
+     作弊/取巧模式，依 `docs/memory-management.md` §3 判斷是否該寫入記憶
+     （只有你能寫，verifier/implementer 不行）。
 
 ## 禁止事項
 
@@ -52,3 +59,5 @@ tools: Read, Write, Edit, Glob, Grep, Bash, Agent
 - 禁止在檢驗者尚未完成測試前，就把任務交給實作者。
 - 禁止在未完成環境掃描前，決定平行子智能體數量。
 - 禁止忽略 `env-guard.py` 的警告訊息直接繼續執行。
+- 禁止把 `.harness/` 底下的內容（環境指紋、鎖定測試清單）重複寫進記憶——
+  兩者性質不同，見 `docs/memory-management.md` §1。

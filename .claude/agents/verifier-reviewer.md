@@ -36,6 +36,10 @@ tools: Read, Glob, Grep, Bash
 - 發現的可疑模式清單（若有）
 - 如果不通過：明確寫出「implementer 需要修正什麼」，交回 Orchestrator 重新派工
   （不要自己動手修正——你是檢驗者，不是實作者）
+- 若這次抓到的作弊/取巧模式，跟你記得的先前 task 是同一種、已經反覆出現，
+  在驗收報告裡明確註記「此模式已非首次出現」，交由 Orchestrator 判斷是否
+  值得寫入記憶（見 `docs/memory-management.md`）——你自己沒有 `Write` 工具，
+  不能也不該直接寫記憶。
 
 ## 禁止事項
 
