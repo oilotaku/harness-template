@@ -23,30 +23,43 @@ STEPS = [
 ]
 
 
-def run_step(title: str, script_name: str) -> None:
+def run_step(title: str, script_name: str) -> int:
     script = SCRIPTS_DIR / script_name
     print(f"\n>>> {title}（{script_name}）")
     if not script.exists():
         print(f"找不到 {script}，略過此步驟。", file=sys.stderr)
-        return
-    subprocess.run([sys.executable, str(script)])
+        return 0
+    result = subprocess.run([sys.executable, str(script)])
+    return result.returncode
 
 
 def main() -> int:
     print("===== harness-template 初始化 =====")
     print(f"Python：{sys.version.split()[0]}（{sys.executable}）")
 
+    env_mismatch = False
     for title, script_name in STEPS:
-        run_step(title, script_name)
+        returncode = run_step(title, script_name)
+        if script_name == "env-guard.py" and returncode != 0:
+            env_mismatch = True
+
+    if env_mismatch:
+        # 不要在指紋不符的情況下仍然印出「初始化完成」——那會讓人誤以為
+        # 一切正常，直接略過上面 env-guard.py 已經印出的警告。
+        print("\n===== 初始化未完全通過：環境指紋不符 =====")
+        print("上面「環境指紋建立/比對」回報這台機器跟先前記錄的不一致。")
+        print("依 CLAUDE.md 黃金法則第 6 條，請先確認：")
+        print("  1) 這是否為刻意更換的新機器/遠端伺服器？")
+        print("  2) 若是，這台機器的資源限制、既有服務、用途為何？")
+        print("  3) 是否要把目前環境更新為新的基準指紋（更新 .harness/env-fingerprint.json）？")
+        print("確認後再繼續下一步，不要直接忽略這個警告。")
+        return 1
 
     print("\n===== 初始化完成 =====")
     print("接下來：")
     print("  - 在 Claude Code 打開這個專案目錄")
     print("  - 用 Orchestrator（.claude/agents/orchestrator.md）或 `/task-plan`")
     print("    開始拆解你的需求")
-    print("  - 若上面「環境指紋建立/比對」回報「指紋不符」，先確認是否為刻意")
-    print("    更換的機器，再決定是否要更新 .harness/env-fingerprint.json 的基準值")
-    print("    （不會自動覆寫，需要人工/Orchestrator 確認）")
     return 0
 
 

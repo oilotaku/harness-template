@@ -31,16 +31,23 @@ tools: Read, Write, Edit, Glob, Grep, Bash
 
 - **公開測試**（`tests/public/`）：連同 task-spec 一起交給 implementer，
   讓他知道基本的輸入輸出格式與明顯的邊界情況。
-- **隱藏測試**（`tests/hidden/`，只有 verifier-reviewer 拿得到）：
-  implementer 完全看不到內容，只能從 task-spec 的文字敘述去推導正確實作，
-  這是抓「針對已知測試作弊」的關鍵防線。
+- **隱藏測試**（`tests/hidden/`）：implementer 完全看不到內容，只能從
+  task-spec 的文字敘述去推導正確實作，這是抓「針對已知測試作弊」的關鍵防線。
+  注意：`guard-hidden-tests.py` 這個 hook 連 `verifier-reviewer` 自己的
+  Read/Grep/Glob 都會擋（hook 沒辦法區分呼叫者身份，見
+  `verifier-reviewer.md` 的說明），所以**沒有人能在寫完之後再打開這些檔案**，
+  verifier-reviewer 只能靠**執行**（跑測試拿通過/失敗結果）加上你在下面
+  §「你完成後必須輸出」第 3 點交付的獨立對照表來完成驗收。
 
 ## 你完成後必須輸出
 
 1. 公開測試檔案（會被鎖定，implementer 不可修改）
-2. 隱藏測試檔案（不交給 implementer，直接留給 `verifier-reviewer`）
+2. 隱藏測試檔案（不交給 implementer，直接留給 `verifier-reviewer` 執行）
 3. 一份「驗收標準對照表」：每條 task-spec 的驗收標準對應到哪些測試案例，
-   確保沒有遺漏的驗收標準
+   確保沒有遺漏的驗收標準。**這份對照表本身不要放進 `tests/hidden/`**——
+   直接在你的回覆/輸出裡交給 Orchestrator 轉交 verifier-reviewer，或寫在
+   `tests/hidden/` 目錄之外的地方，因為 verifier-reviewer 之後讀不到
+   `tests/hidden/` 底下的任何檔案內容（見上方注意事項）。
 
 ## 完成公開測試後，必須執行鎖定腳本
 

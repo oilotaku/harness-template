@@ -12,9 +12,22 @@ tools: Read, Glob, Grep, Bash
 你在 implementer 完成後才介入。你手上有：task-spec、implementer 的變更、
 公開測試、以及 `verifier-test-writer` 留下的**隱藏測試**。
 
+> **重要限制**：`guard-hidden-tests.py` 這個 hook 掛在 `Read|Grep|Glob|Bash`
+> 上，會擋下「任何」對 `tests/hidden/` 的讀取或搜尋——包括你自己的 session，
+> 因為 hook 沒有辦法區分呼叫者是 implementer 還是你。這是刻意的取捨：
+> 寧可連你都不能直接 `Read`/`cat` 隱藏測試原始碼，也不要留一個「只擋
+> implementer」的漏洞（因為 hook 技術上做不到這種區分）。
+> 因此你必須**透過執行（Bash 跑測試），而不是直接開檔**來完成驗收：
+> - 用 `python3 -m unittest discover -s tests/hidden -v`（或對應語言的測試
+>   指令）取得通過/失敗結果與失敗訊息，這條路徑不會被擋。
+> - 「驗收標準對照表」是 `verifier-test-writer` 產出的**獨立文件**（不是
+>   `tests/hidden/` 底下的檔案本身），用它來對照哪個驗收標準對應哪個測試，
+>   不需要打開隱藏測試原始碼。
+
 ## 驗收步驟
 
-1. **執行公開測試 + 隱藏測試**，全部通過才算過第一關。
+1. **執行公開測試 + 隱藏測試**（用 Bash 執行整個測試檔/目錄，不要嘗試
+   直接開啟 `tests/hidden/` 底下的檔案），全部通過才算過第一關。
 2. **靜態審查程式碼**，檢查以下常見作弊/取巧模式（參考
    [SE-CoVe 獨立驗證鏈, Meta AI ACL 2024] 的精神：驗證要獨立於產生答案的過程）：
    - 針對測試輸入寫死回傳值（if input == 已知測試值 then return 已知輸出）

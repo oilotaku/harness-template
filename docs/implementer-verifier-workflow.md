@@ -45,12 +45,15 @@
 
 1. **時間序保證**：測試先於實作存在，實作者無法回頭修改測試來遷就自己的程式碼。
 2. **資訊不對稱保證**：隱藏測試對實作者不可見，實作者無法針對已知測試案例作弊，
-   只能老實依 task-spec 的文字敘述去實作正確邏輯。
+   只能老實依 task-spec 的文字敘述去實作正確邏輯。這不只是流程約定——
+   `guard-hidden-tests.py` 這個 hook 同時掛在 `Read|Grep|Glob`，implementer
+   用這些工具直接讀取/搜尋 `tests/hidden/` 也會被擋下，不是只擋寫入。
 3. **權限保證**：透過 `.claude/settings.json` 的 hook（`guard-hidden-tests.py`）
-   在工具層級直接擋下對測試檔案的寫入，不只是靠「口頭約定」。此 hook 同時掛在
-   `Edit|Write|Bash`——只擋 Edit/Write 不夠，implementer 仍握有 Bash 工具，
-   可以直接用 `rm`/`sed -i`/重導向等指令繞過路徑層級保護，因此 Bash 指令也會被
-   同一支腳本掃描比對。
+   在工具層級直接擋下對測試檔案的寫入與讀取，不只是靠「口頭約定」。此 hook 掛在
+   `Edit|Write|Bash|Read|Grep|Glob`——只擋 Edit/Write 不夠，implementer 仍握有
+   Bash 工具，可以直接用 `rm`/`sed -i`/重導向、或切換工作目錄後用相對路徑等方式
+   繞過單純的路徑字串比對，因此 Bash 指令會先切成多個簡單指令、追蹤 `cd` 造成的
+   虛擬工作目錄後再逐一比對（細節與已知殘留限制見腳本內的模組說明）。
 4. **獨立驗證鏈**：`verifier-reviewer` 與 `implementer-*` 是不同 session，
    不共用上下文，驗收時是「從零重新審視」而不是延續實作者的思路
    （對應 SE-CoVe 獨立驗證鏈的精神）。
