@@ -1,0 +1,29 @@
+{
+  "$comment": "範例設定：實際欄位請依你使用的 Claude Code 版本文件調整",
+  "permissions": {
+    "allow": [
+      "Bash(python3 scripts/machine-profile.py)",
+      "Bash(python3 scripts/service-scan.py)",
+      "Bash(python3 scripts/env-guard.py)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(git push --force*)",
+      "Bash(*DROP TABLE*)",
+      "Bash(*TRUNCATE*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 scripts/guard-hidden-tests.py"
+          }
+        ]
+      }
+    ]
+  }
+}
