@@ -60,6 +60,9 @@ jobs:
       - name: 掃描腳本機器可讀輸出回歸測試（--json 只能吐 JSON、平行度換算、快取）
         run: python scripts/test-scan-json.py
 
+      - name: 執行時間預測回歸測試（區間、無界任務不估、樣本不足不校準）
+        run: python scripts/test-timing.py
+
       - name: 在非 UTF-8 locale 下重跑（Linux 就能抓到編碼 bug，不用等 Windows）
         if: runner.os == 'Linux'
         env:
@@ -73,6 +76,7 @@ jobs:
           python -X utf8=0 scripts/test-env-guard.py
           python -X utf8=0 scripts/test-config.py
           python -X utf8=0 scripts/test-scan-json.py
+          python -X utf8=0 scripts/test-timing.py
 
       - name: 範例流程仍可重跑
         working-directory: templates/examples/demo-fizzbuzz

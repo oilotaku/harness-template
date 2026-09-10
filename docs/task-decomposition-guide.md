@@ -27,8 +27,13 @@
  ├─ 找出可獨立驗收的邏輯單元
  ├─ 每個單元寫一份 task-spec（見 templates/task-spec-template.md）
  ├─ 標出彼此的 depends_on 關係
- └─ 依 docs/model-thinking-matrix.md 標註模型/思考層級
+ ├─ 依 docs/model-thinking-matrix.md 標註模型/思考層級
+ └─ 依 docs/time-estimation.md 標分類並估時
 ```
+
+估時不是行政流程，它是拆解的檢查工具：**分類不出來的 task 就是還沒被界定**
+（`estimate-time.py` 會直接拒絕估這種任務）。遇到這種情況先回頭收斂範圍，
+不要帶著一個沒有終點的題目往下派工。
 
 ## 4. blocked 任務的處理原則
 

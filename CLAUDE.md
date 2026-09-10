@@ -112,7 +112,7 @@ harness-template/
 └── templates/                    ← task-spec 與驗收報告範本（含 examples/ 範例）
 ```
 
-> `.harness/`（環境指紋、鎖定清單、隱藏測試 manifest、進度檢查點、掃描快取）與封存庫（repo 之外）
+> `.harness/`（環境指紋、鎖定清單、隱藏測試 manifest、進度檢查點、掃描快取、估時紀錄）與封存庫（repo 之外）
 > 都不會進版控，前者已在 `.gitignore`，後者根本不在 repo 裡。
 
 ---
