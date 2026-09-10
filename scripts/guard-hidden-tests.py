@@ -60,6 +60,14 @@ repo 之外時回傳 None，代表不歸本 hook 管（例如 `/etc/hosts`）。
 腳本自己救不了，靠 `scripts/guard-selfcheck.py`（SessionStart hook）在 session
 一開始就驗證防護是否真的生效，以及 `scripts/verify-locks.py` 的事後雜湊稽核。
 
+歷史（2026-09-10 第四版，對應 P1-1）：隱藏測試改成「封存」機制——
+`scripts/seal-hidden-tests.py` 會把 `tests/hidden/` 底下的檔案加密搬到 repo 之外
+（見 `scripts/hidden_vault.py` 的模組說明）。這讓本 hook 的角色從「唯一防線」
+降級成「縱深防禦的其中一層」：真正擋住 implementer 的是「檔案不在工作目錄裡」
+（Claude Code 的檔案工具本來就以專案目錄為界）加上「內容是密文」。
+本腳本仍然保護兩件事：`tests/hidden/`（封存前的暫存區），
+以及封存庫路徑本身（`VAULT_DIRS`，讓誤觸時得到明確訊息而不是一堆亂碼）。
+
 Claude Code 會把這次工具呼叫的資訊以 JSON 透過 stdin 傳入本腳本。
 - Edit/Write 等工具的目標路徑在 tool_input.file_path。
 - Bash 工具的指令字串在 tool_input.command。
@@ -95,6 +103,47 @@ def _repo_root() -> Path:
 
 REPO_ROOT = _repo_root()
 LOCKED_LIST = REPO_ROOT / ".harness" / "locked-tests.list"
+HIDDEN_MANIFEST = REPO_ROOT / ".harness" / "hidden-manifest.json"
+
+
+def _vault_dirs() -> list:
+    """已封存隱藏測試的存放位置（P1-1），一律在 repo 之外，因此不能靠
+    repo 相對路徑比對，要用絕對路徑判斷。
+
+    封存內容本身是加密的（見 scripts/hidden_vault.py），所以就算這裡漏掉一條
+    路徑寫法，讀到的也只是密文——這一層純粹是縱深防禦，讓「不小心碰到」
+    也會得到明確的拒絕訊息，而不是一堆看不懂的亂碼。
+
+    來源有三個，全部納入：預設位置、HARNESS_HIDDEN_DIR 覆寫、以及 manifest 裡
+    實際記錄過的位置（涵蓋「封存時有覆寫、現在沒設環境變數」這種情況）。
+    """
+    dirs = []
+
+    def add(raw):
+        if not raw:
+            return
+        try:
+            resolved = Path(raw).resolve()
+        except OSError:
+            return
+        if resolved not in dirs:
+            dirs.append(resolved)
+
+    add(REPO_ROOT.parent / ".harness-hidden" / REPO_ROOT.name)
+    add(os.environ.get("HARNESS_HIDDEN_DIR"))
+
+    if HIDDEN_MANIFEST.exists():
+        try:
+            manifest = json.loads(HIDDEN_MANIFEST.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            manifest = {}
+        for info in (manifest.get("tasks") or {}).values():
+            if isinstance(info, dict):
+                add(info.get("vault_dir"))
+                add(info.get("task_dir"))
+
+    return dirs
+
 
 # 這些工具只要目標落在 tests/hidden/ 之下就一律擋（讀寫都擋，見模組說明）。
 READ_TOOL_PATH_FIELDS = {
@@ -126,45 +175,70 @@ REDIRECT_PATTERN = re.compile(r"(?:^|\s)\d*>{1,2}\s*(\S+)")
 
 SHA256_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
 
+VAULT_DIRS = _vault_dirs()
+
+VAULT_REASON = (
+    "拒絕：這個路徑屬於隱藏測試封存庫（repo 之外，內容已加密）。"
+    "唯一的合法入口是 `python3 scripts/run-hidden-tests.py --task-id <id> --token <權杖>`，"
+    "而權杖只會交給 verifier-reviewer。若你是 implementer——隱藏測試對你不可見是刻意設計，"
+    "請只依 task-spec 與公開測試實作（黃金法則第 1 條）。"
+)
+
 
 def _normalize(path: str) -> str:
     return path.replace("\\", "/")
 
 
-def _to_repo_relative(raw: str, cwd: str = ""):
-    """把任何寫法的路徑換算成「相對於 repo 根目錄」的 posix 路徑。
+def _to_absolute(raw: str, cwd: Path = None):
+    """把任何寫法的路徑解析成絕對路徑（吸收反斜線、`./`、多重斜線、`..`）。
 
-    吸收反斜線、`./`、多重斜線、`..` 與絕對路徑——第二版就是因為
-    Edit/Write/Read 這條路徑少了這一步，才會被絕對路徑整組繞過（P0-1）。
-
-    回傳值：
-      - 字串：repo 相對路徑（`""` 代表 repo 根目錄本身）
-      - None：落在 repo 之外或無法解析，不歸本 hook 管
-
-    `cwd` 是已經換算成 repo 相對路徑的虛擬工作目錄（Bash 分支追蹤 `cd` 用）；
-    傳入 None 代表虛擬工作目錄已經切到 repo 之外，其下的相對路徑一律不歸本 hook 管。
+    `cwd` 是虛擬工作目錄（Bash 分支追蹤 `cd` 用），預設為 repo 根目錄。
+    無法解析時回傳 None。
     """
-    if cwd is None:
-        return None
     token = _normalize(raw).strip().strip("\"'")
     if not token:
         return None
 
     candidate = Path(token)
     if not candidate.is_absolute():
-        candidate = (REPO_ROOT / cwd / token) if cwd else (REPO_ROOT / token)
+        candidate = (cwd or REPO_ROOT) / token
 
     try:
-        resolved = candidate.resolve()
+        return candidate.resolve()
     except OSError:
         return None
 
+
+def _to_repo_relative(raw: str, cwd: Path = None):
+    """把任何寫法的路徑換算成「相對於 repo 根目錄」的 posix 路徑。
+
+    第二版就是因為 Edit/Write/Read 這條路徑少了正規化這一步，
+    才會被絕對路徑整組繞過（P0-1）。
+
+    回傳值：
+      - 字串：repo 相對路徑（`""` 代表 repo 根目錄本身）
+      - None：落在 repo 之外或無法解析，不歸本 hook 的「repo 內保護」管
+        （repo 之外另有封存庫的判斷，見 `_is_vault_path`）
+    """
+    resolved = _to_absolute(raw, cwd)
+    if resolved is None:
+        return None
     try:
         relative = resolved.relative_to(REPO_ROOT).as_posix()
     except ValueError:
         return None
-
     return "" if relative == "." else relative
+
+
+def _is_vault_path(raw: str, cwd: Path = None) -> bool:
+    """這個路徑是不是落在隱藏測試封存庫底下（P1-1）。"""
+    resolved = _to_absolute(raw, cwd)
+    if resolved is None:
+        return False
+    for vault_dir in VAULT_DIRS:
+        if resolved == vault_dir or vault_dir in resolved.parents:
+            return True
+    return False
 
 
 def _parse_locked_line(line: str):
@@ -218,6 +292,9 @@ def _is_protected_write_target(rel, locked: set) -> bool:
 
 def _check_file_path(raw_path: str, locked: set, tool_name: str = None):
     """涵蓋 Edit/Write/MultiEdit 等會寫入檔案的工具。"""
+    if _is_vault_path(raw_path):
+        return VAULT_REASON
+
     target = _to_repo_relative(raw_path)
     if target is None:
         # 落在 repo 之外的路徑不歸本 hook 管（例如 /tmp、使用者家目錄）。
@@ -253,7 +330,11 @@ def _check_read_tool(tool_name: str, tool_input: dict):
         return None
     for field in fields:
         value = tool_input.get(field)
-        if isinstance(value, str) and value and _is_hidden_tests_path(_to_repo_relative(value)):
+        if not isinstance(value, str) or not value:
+            continue
+        if _is_vault_path(value):
+            return VAULT_REASON
+        if _is_hidden_tests_path(_to_repo_relative(value)):
             return (
                 "拒絕：實作者子智能體不可讀取或搜尋 tests/hidden/ 目錄"
                 "（隱藏驗收測試，黃金法則第 1 條——不能修改，也不能看到）。"
@@ -292,7 +373,7 @@ def _check_bash_command(command: str, locked: set):
     normalized = _normalize(command)
     segments = [s for s in SEGMENT_SPLIT.split(normalized) if s.strip()]
 
-    cwd = ""  # repo 相對的虛擬工作目錄；None 代表已經切到 repo 之外
+    cwd = REPO_ROOT  # 虛擬工作目錄（絕對路徑），跟著 `cd` 走
     for raw_segment in segments:
         try:
             tokens = shlex.split(raw_segment, posix=True)
@@ -306,8 +387,18 @@ def _check_bash_command(command: str, locked: set):
         args = tokens[1:]
 
         if verb == "cd" and args:
-            cwd = _to_repo_relative(args[0], cwd)
+            cwd = _to_absolute(args[0], cwd) or cwd
             continue
+
+        # 封存庫（P1-1）：repo 之外，且沒有任何正當理由需要直接碰它——
+        # 唯一的合法入口是 scripts/run-hidden-tests.py，而它不會把封存路徑
+        # 寫進指令字串。因此這裡不分動詞，只要任何一個參數指到封存庫就擋。
+        for token in args:
+            if not token.startswith("-") and _is_vault_path(token, cwd):
+                return VAULT_REASON
+        for vault_dir in VAULT_DIRS:
+            if str(vault_dir) in raw_segment:
+                return VAULT_REASON
 
         # 寫入類候選：受完整保護（tests/hidden/ + .harness/ + 已鎖定的公開測試）。
         # 讀取類候選：只受 tests/hidden/ 保護——已鎖定的公開測試本來就是要

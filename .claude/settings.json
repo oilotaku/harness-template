@@ -10,7 +10,10 @@
       "Bash(python3 scripts/verify-locks.py)",
       "Bash(python3 scripts/guard-selfcheck.py)",
       "Bash(python3 scripts/test-guards.py)",
-      "Bash(python3 scripts/test-locks.py)"
+      "Bash(python3 scripts/test-locks.py)",
+      "Bash(python3 scripts/seal-hidden-tests.py:*)",
+      "Bash(python3 scripts/run-hidden-tests.py:*)",
+      "Bash(python3 scripts/test-vault.py)"
     ],
     "deny": [
       "Bash(rm -rf *)",

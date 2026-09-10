@@ -42,9 +42,19 @@ tools: Read, Write, Edit, Glob, Grep, Bash, Agent
 
 6. **派工（檢驗者必須先於實作者）**
    - 對每個 task：先指派給對應的 `verifier-test-writer`，
-     等測試（含隱藏測試）建立完成、鎖定後，才把 task-spec + 公開測試
-     交給對應的 `implementer-*`。
+     等公開測試鎖定（`lock-tests.py`）、隱藏測試封存（`seal-hidden-tests.py`）
+     完成後，才把 task-spec + 公開測試交給對應的 `implementer-*`。
    - 實作完成後，交給 `verifier-reviewer`（必要時加 `verifier-security`）驗收。
+
+   **執行權杖的保管（不可弄錯，弄錯整套防作弊機制就白做）**
+   - `verifier-test-writer` 封存隱藏測試後會交回一串「執行權杖」，只有你保管。
+   - 只在派工 `verifier-reviewer` 時，把該 task 的權杖放進**那一個 session 的提示詞**。
+   - **絕對不可以**把權杖放進 task-spec、公開測試、驗收報告、commit 訊息，
+     或任何 `implementer-*` 看得到的地方——權杖一旦流到 implementer 手上，
+     隱藏測試就從「看不到的題目」退化成「可以反覆查詢的 oracle」。
+   - 驗收若因測試本身有誤需要重寫，`verifier-test-writer` 重新封存會產生**新權杖**，
+     舊的立即失效，記得替換。
+   - 權杖遺失沒有救援路徑，只能請 `verifier-test-writer` 重寫並重新封存。
 
 7. **彙整**
    - 收集所有 `templates/verification-report-template.md`，
@@ -59,5 +69,8 @@ tools: Read, Write, Edit, Glob, Grep, Bash, Agent
 - 禁止在檢驗者尚未完成測試前，就把任務交給實作者。
 - 禁止在未完成環境掃描前，決定平行子智能體數量。
 - 禁止忽略 `env-guard.py` 的警告訊息直接繼續執行。
-- 禁止把 `.harness/` 底下的內容（環境指紋、鎖定測試清單）重複寫進記憶——
-  兩者性質不同，見 `docs/memory-management.md` §1。
+- 禁止把 `.harness/` 底下的內容（環境指紋、鎖定測試清單、隱藏測試 manifest）
+  重複寫進記憶——兩者性質不同，見 `docs/memory-management.md` §1。
+- **禁止把隱藏測試的執行權杖寫進記憶**。記憶是跨 session 持久保存的，
+  權杖是單次任務的一次性秘密，寫進去等於讓它無限期外流。
+- 禁止在隱藏測試尚未封存（`seal-hidden-tests.py` 尚未執行）前就派工給 implementer。

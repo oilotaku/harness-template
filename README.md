@@ -40,20 +40,26 @@
 
 | 腳本 | 角色 | 什麼時候跑 |
 |---|---|---|
-| `scripts/guard-hidden-tests.py` | **事前攔截**：PreToolUse hook，擋下對 `tests/hidden/` 的讀寫、對 `.harness/` 與已鎖定公開測試的寫入 | 每次工具呼叫（由 `.claude/settings.json` 掛上） |
+| `scripts/seal-hidden-tests.py` | **實體隔離**：把 `tests/hidden/` 加密搬到 repo 之外，並產生一次性執行權杖 | verifier-test-writer 寫完隱藏測試後 |
+| `scripts/run-hidden-tests.py` | 隱藏測試的**唯一執行入口**，需要權杖才解得開 | verifier-reviewer 驗收時 |
+| `scripts/hidden_vault.py` | 上面兩支共用的封存庫邏輯（加密、manifest、路徑規則） | 被 import，不直接執行 |
+| `scripts/guard-hidden-tests.py` | **事前攔截**：PreToolUse hook，擋下對 `tests/hidden/`（暫存區）、封存庫路徑、`.harness/` 與已鎖定公開測試的存取 | 每次工具呼叫（由 `.claude/settings.json` 掛上） |
 | `scripts/lock-tests.py` | 把 `tests/public/` 的**路徑 + sha256** 寫進 `.harness/locked-tests.list` | verifier-test-writer 寫完公開測試後 |
 | `scripts/verify-locks.py` | **事後稽核**：重算雜湊比對，抓出「事前攔截被繞過」的竄改 | verifier-reviewer 驗收的第一步 |
 | `scripts/guard-selfcheck.py` | **自我檢查**：用已知該被擋的 payload 實跑一次，確認防護這次真的生效 | SessionStart hook |
-| `scripts/test-guards.py` | guard 的回歸測試（含歷史繞過手法） | 改動 guard 之後 |
-| `scripts/test-locks.py` | lock/verify 的回歸測試 | 改動鎖定機制之後 |
+| `scripts/test-guards.py` / `test-locks.py` / `test-vault.py` | 上述機制各自的回歸測試 | 改動機制之後 |
 
-事前攔截一定有極限（見 `docs/improvement-suggestions.md`），所以三層要一起用：
-攔得住最好，攔不住至少事後查得出來，機制壞掉至少會有訊號。
+四層各擋不同的東西，缺一不可：
+
+1. **實體隔離**（封存）：檔案不在工作目錄裡、內容是密文 —— 這是主防線
+2. **事前攔截**（hook）：擋暫存區與封存庫路徑，讓誤觸得到明確訊息
+3. **事後稽核**（雜湊）：不依賴攔截是否成功，被改過就查得出來
+4. **自我檢查**（SessionStart）：機制壞掉時至少會有訊號，而不是默默全開
 
 改動任何一支之後，請執行：
 
 ```bash
-python3 scripts/test-guards.py && python3 scripts/test-locks.py
+python3 scripts/test-guards.py && python3 scripts/test-locks.py && python3 scripts/test-vault.py
 ```
 
 ## 設計依據

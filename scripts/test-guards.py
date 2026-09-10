@@ -36,16 +36,45 @@ def case(name):
     return deco
 
 
-def run_guard(cwd: Path, payload, raw_stdin: str = None) -> subprocess.CompletedProcess:
+def run_guard(cwd: Path, payload, raw_stdin: str = None, extra_env=None) -> subprocess.CompletedProcess:
     # 一律明確指定 CLAUDE_PROJECT_DIR，否則會繼承外層 Claude Code session 的值，
     # 讓 guard 拿真正的專案目錄當基準，測試就會全部對不上暫存情境。
+    env = {**os.environ, "CLAUDE_PROJECT_DIR": str(cwd)}
+    env.pop("HARNESS_HIDDEN_DIR", None)
+    if extra_env:
+        env.update(extra_env)
     return subprocess.run(
         [sys.executable, str(GUARD_SCRIPT)],
         input=raw_stdin if raw_stdin is not None else json.dumps(payload),
         text=True,
         capture_output=True,
         cwd=cwd,
-        env={**os.environ, "CLAUDE_PROJECT_DIR": str(cwd)},
+        env=env,
+    )
+
+
+def default_vault(tmp: Path) -> Path:
+    """guard 推導封存庫預設位置的方式（見 guard-hidden-tests.py 的 _vault_dirs）。"""
+    return tmp.parent / ".harness-hidden" / tmp.name
+
+
+def write_manifest(tmp: Path, task_dir: Path) -> None:
+    (tmp / ".harness").mkdir(exist_ok=True)
+    (tmp / ".harness" / "hidden-manifest.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "tasks": {
+                    "T1": {
+                        "task_dir": str(task_dir),
+                        "vault_dir": str(task_dir.parent),
+                        "token_sha256": "0" * 64,
+                        "files": [],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
     )
 
 
@@ -475,6 +504,90 @@ def _(tmp: Path):
 def _(tmp: Path):
     result = run_guard(tmp, None, raw_stdin="")
     assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+# ------------------------------------------- P1-1：封存庫路徑保護（2026-09-10）
+#
+# 封存後的隱藏測試在 repo 之外，而且內容是加密的（見 scripts/hidden_vault.py），
+# 所以這一層只是縱深防禦——目的是讓誤觸的人得到明確訊息，而不是一堆亂碼。
+
+
+@case("P1-1 Read 預設封存庫路徑應被擋")
+def _(tmp: Path):
+    result = run_guard(
+        tmp,
+        {"tool_name": "Read", "tool_input": {"file_path": str(default_vault(tmp) / "T1/test.py.enc")}},
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P1-1 Bash cat 預設封存庫路徑應被擋")
+def _(tmp: Path):
+    result = run_guard(
+        tmp,
+        {"tool_name": "Bash", "tool_input": {"command": f"cat {default_vault(tmp) / 'T1/test.py.enc'}"}},
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P1-1 封存庫底下的存取不分動詞一律擋（ls 也擋）")
+def _(tmp: Path):
+    result = run_guard(
+        tmp, {"tool_name": "Bash", "tool_input": {"command": f"ls {default_vault(tmp)}"}}
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P1-1 HARNESS_HIDDEN_DIR 覆寫的位置也受保護")
+def _(tmp: Path):
+    custom = tmp.parent / f"custom-vault-{tmp.name}"
+    result = run_guard(
+        tmp,
+        {"tool_name": "Read", "tool_input": {"file_path": str(custom / "T1/test.py.enc")}},
+        extra_env={"HARNESS_HIDDEN_DIR": str(custom)},
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P1-1 manifest 記錄過的封存位置也受保護（封存時有覆寫、現在沒設環境變數）")
+def _(tmp: Path):
+    recorded = tmp.parent / f"recorded-vault-{tmp.name}" / "T1"
+    write_manifest(tmp, recorded)
+    result = run_guard(
+        tmp, {"tool_name": "Read", "tool_input": {"file_path": str(recorded / "test.py.enc")}}
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P1-1 執行 run-hidden-tests.py 本身不該被擋（唯一的合法入口）")
+def _(tmp: Path):
+    result = run_guard(
+        tmp,
+        {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "python3 scripts/run-hidden-tests.py --task-id T1 --token abc123"
+            },
+        },
+    )
+    assert result.returncode == 0, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P1-1 執行 seal-hidden-tests.py 本身不該被擋")
+def _(tmp: Path):
+    result = run_guard(
+        tmp,
+        {"tool_name": "Bash", "tool_input": {"command": "python3 scripts/seal-hidden-tests.py --task-id T1"}},
+    )
+    assert result.returncode == 0, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P1-1 repo 之外、與封存庫無關的路徑仍然放行")
+def _(tmp: Path):
+    result = run_guard(
+        tmp, {"tool_name": "Read", "tool_input": {"file_path": str(tmp.parent / "unrelated/x.py")}}
+    )
+    assert result.returncode == 0, f"exit={result.returncode} stderr={result.stderr}"
 
 
 def main() -> int:

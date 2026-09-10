@@ -15,11 +15,15 @@
 | P0-5 fail-closed + hook 掛法 | ✅ 已修正 | 腳本 fail-closed、`$CLAUDE_PROJECT_DIR` + timeout、新增 `guard-selfcheck.py` |
 | P1-2 鎖定清單雜湊稽核 | ✅ 已修正 | `lock-tests.py` 寫入 sha256、新增 `verify-locks.py` 與 `test-locks.py` |
 | P2-4 hook matcher 明確列全 | ✅ 順手修正 | 改 hook 指令時一併把 `MultiEdit`/`NotebookEdit` 寫進 matcher |
-| 其餘 P0-2 / P0-3 / P0-4 / P1-1 / P1-3 / P1-4 / P2 / P3 | ⬜ 未動 | 見下方各節 |
+| P1-1 隱藏測試移出工作目錄 | ✅ 已修正 | 新增 `hidden_vault.py` / `seal-hidden-tests.py` / `run-hidden-tests.py`：加密封存到 repo 之外 + 執行權杖 |
+| P0-2 全 repo 搜尋撈到隱藏測試 | ✅ 由 P1-1 消解 | 檔案已不在工作目錄裡，搜尋範圍內根本沒有它 |
+| P0-4 把隱藏測試當 oracle 執行 | ✅ 由 P1-1 消解 | 解密需要權杖，implementer 的上下文裡沒有 |
+| P0-3 Bash 包裝繞過 | 🟡 降級 | `tests/hidden/`（暫存區）仍可能被繞過；但封存後那裡是空的，封存庫拿到的是密文 |
+| 其餘 P1-3 / P1-4 / P2 / P3 | ⬜ 未動 | 見下方各節 |
 
 已修正的項目在小節標題標上「✅ 已修正」，內文保留原本的問題描述當作紀錄。
-回歸測試：`python3 scripts/test-guards.py`（42 案例）、
-`python3 scripts/test-locks.py`（12 案例）。
+回歸測試：`python3 scripts/test-guards.py`（50 案例）、
+`python3 scripts/test-locks.py`（12 案例）、`python3 scripts/test-vault.py`（19 案例）。
 
 ---
 
@@ -37,11 +41,12 @@
 流程設計、角色分工、文件密度這些部分其實寫得相當完整（比多數同類模板嚴謹），
 問題集中在「機制的實作」與「文件宣稱的保護強度」之間的落差。以下依嚴重度排序。
 
-> **2026-09-10 更新**：本段描述的是修正前的狀態，保留作為紀錄。P0-1（絕對路徑繞過）
-> 與 P0-5（fail-open）已修正，「照正常用法讀隱藏測試不會被擋」這件事已經不成立；
-> 但 P0-2（全 repo 搜尋）、P0-3（`bash -c` 等包裝）、P0-4（把隱藏測試當 oracle 執行）
-> 仍然存在，因此**隱藏測試目前仍不能視為對 implementer 完全不可見**。
-> 在 P1-1 完成之前，防線的實際強度來自 P1-2 的事後稽核，而不是事前攔截。
+> **2026-09-10 更新**：本段描述的是修正前的狀態，保留作為紀錄。P0-1、P0-5、P1-2
+> 已修正，接著 P1-1 把隱藏測試整個搬出工作目錄並加密封存——**這才是結構性的解**：
+> 防線不再建立在「攔得住每一種路徑寫法」上，而是建立在「檔案不在那裡、內容是密文、
+> 解密要權杖」。P0-2 與 P0-4 因此一併消解，P0-3 降級成只影響封存前的暫存區。
+> 殘留限制見 P1-1 該節與 `scripts/run-hidden-tests.py` 的模組說明，主要是：
+> 測試執行的短暫期間，解密後的明文確實存在於一個暫存目錄。
 
 ---
 
@@ -93,7 +98,7 @@ def _to_repo_relative(raw: str, cwd: str = "") -> str:
 
 ---
 
-### P0-2. 不指定 path 的搜尋會把隱藏測試內容撈進上下文【已驗證】
+### P0-2. 不指定 path 的搜尋會把隱藏測試內容撈進上下文【已驗證】✅ 由 P1-1 消解
 
 `_check_read_tool()` 只檢查 `path` / `glob` / `pattern` 欄位「是不是指到
 `tests/hidden/`」。但搜尋類工具**不指定 path 時預設搜整個 repo**：
@@ -120,7 +125,7 @@ def _to_repo_relative(raw: str, cwd: str = "") -> str:
 
 ---
 
-### P0-3. Bash 分支有一整排結構性繞過【已驗證】
+### P0-3. Bash 分支有一整排結構性繞過【已驗證】🟡 影響範圍已由 P1-1 降級
 
 `_check_bash_command()` 只看每個 segment 的**第一個 token** 是不是已知動詞，
 所以換一種包裝就能穿過去：
@@ -150,7 +155,7 @@ def _to_repo_relative(raw: str, cwd: str = "") -> str:
 
 ---
 
-### P0-4. implementer 可以直接「執行」隱藏測試，把它當成 oracle【已驗證】
+### P0-4. implementer 可以直接「執行」隱藏測試，把它當成 oracle【已驗證】✅ 由 P1-1 消解
 
 ```
 Bash {"command": "python3 -m pytest tests/hidden -q"}   → 放行
@@ -206,7 +211,7 @@ Bash {"command": "python3 -m pytest tests/hidden -q"}   → 放行
 
 ## P1 — 機制設計層級
 
-### P1-1. 隱藏測試不該放在工作目錄裡（根本解）
+### P1-1. 隱藏測試不該放在工作目錄裡（根本解）✅ 已修正
 
 P0-1 到 P0-4 有同一個根因：**隱藏測試就躺在 implementer 的工作目錄裡，
 只靠一支 hook 在幾十種路徑寫法之間攔截**。攻擊面是無限的，防守面是列舉的。
@@ -225,6 +230,27 @@ P0-1 到 P0-4 有同一個根因：**隱藏測試就躺在 implementer 的工作
 - `tests/hidden/` 在 repo 內只留一個 README，說明「這裡不放東西，見上述機制」。
 
 這一步做完，P0-1／P0-2／P0-4 大部分自然消失，hook 退化成單純的第二道防線。
+
+> **實際落地**：已照此修正，但有兩處刻意的差異：
+>
+> 1. **多了「加密」這一層**。原本的草稿只講「搬出工作目錄」，實作時發現這樣不夠——
+>    implementer 手上有 Bash，可以自己寫一支 `leak.py` 去讀任何絕對路徑，這是攔不完的。
+>    所以封存時內容會用權杖推導的金鑰加密（SHA-256 keystream XOR，只用標準函式庫），
+>    直接讀到的是密文。**路徑因此不需要是秘密**，整個機制不再依賴 shell 指令解析。
+>    這也是為什麼 P0-3 只能算「降級」而不是「解決」：它現在只影響封存前的暫存區。
+> 2. **暫存區保留在 `tests/hidden/`**。verifier-test-writer 仍然把隱藏測試寫在原處，
+>    寫完執行 `seal-hidden-tests.py` 才搬走——因為子智能體的 Write 工具同樣只能寫在
+>    專案目錄內，沒有暫存區的話它根本沒地方產出檔案。
+>
+> 另外三點（runner 為唯一入口、權杖只給 verifier-reviewer、`tests/hidden/` 留 README）
+> 都照做了。runner 的輸出沒有做「只給摘要」的裁切——verifier-reviewer 需要失敗訊息
+> 才能寫驗收報告，而沒有權杖的人根本跑不動，裁切輸出保護不到任何東西。
+>
+> **殘留限制（誠實記載）**：解密後的明文在測試執行的短暫期間確實存在於一個
+> 權限 0700 的暫存目錄，同一個使用者身分的行程掃得到。要完全消除需要獨立的
+> 使用者/容器，超出本模板範圍。
+>
+> 對應測試：`scripts/test-vault.py`（19 案例）與 `scripts/test-guards.py` 的 `P1-1 *` 案例。
 
 ### P1-2. `lock-tests.py` 只記路徑，沒記內容雜湊 ✅ 已修正
 
