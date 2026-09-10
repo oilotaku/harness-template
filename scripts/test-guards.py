@@ -190,6 +190,46 @@ def _(tmp: Path):
     assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
 
 
+@case("Write 寫入 .harness/progress/ 進度檢查點應放行")
+def _(tmp: Path):
+    result = run_guard(
+        tmp, {"tool_name": "Write", "tool_input": {"file_path": ".harness/progress/T-001.md"}}
+    )
+    assert result.returncode == 0, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("Bash 寫入 .harness/progress/ 進度檢查點應放行")
+def _(tmp: Path):
+    result = run_guard(
+        tmp,
+        {
+            "tool_name": "Bash",
+            "tool_input": {"command": "echo '- 狀態：實作中' > .harness/progress/T-001.md"},
+        },
+    )
+    assert result.returncode == 0, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case(".harness/progress 的開口不可被 .. 逃逸回治理檔案")
+def _(tmp: Path):
+    result = run_guard(
+        tmp,
+        {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": ".harness/progress/../locked-tests.list"},
+        },
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case(".harness/progressive 這種相似名稱不算開口，仍應被擋")
+def _(tmp: Path):
+    result = run_guard(
+        tmp, {"tool_name": "Edit", "tool_input": {"file_path": ".harness/progressive.json"}}
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
 @case("缺 file_path 應放行（payload 合法，只是沒有可判斷的目標）")
 def _(tmp: Path):
     result = run_guard(tmp, {"tool_name": "Edit", "tool_input": {}})

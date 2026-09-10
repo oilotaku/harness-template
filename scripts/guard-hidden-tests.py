@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """guard-hidden-tests.py — PreToolUse hook（取代 bash 版本，Win/Linux/Mac 通用）
-阻擋任何對 tests/hidden/ 的存取（讀取與寫入），以及對 .harness/ 或已鎖定
-公開測試的寫入，強制實作者/檢驗者分離（黃金法則第 1 條）。
+阻擋任何對 tests/hidden/ 的存取（讀取與寫入），以及對 .harness/（`progress/` 除外，
+見 HARNESS_PROGRESS_PREFIX）或已鎖定公開測試的寫入，強制實作者/檢驗者分離
+（黃金法則第 1 條）。
 
 歷史（2026-09-09 code review 後的第二版）：第一版只用「整個指令字串裡有沒有
 出現保護路徑的子字串」+「整個指令字串裡有沒有出現寫入類關鍵字」這種粗略比對，
@@ -113,6 +114,16 @@ for _stream in (sys.stdout, sys.stderr):
             pass
 
 HARNESS_DIR_PREFIX = ".harness"
+
+# `.harness/` 底下唯一開放寫入的子目錄：跨 session 的任務進度檢查點
+# （見 docs/token-strategy.md §3.2）。其餘 `.harness/` 內容是治理檔案
+# （鎖定清單、環境指紋、隱藏測試 manifest），只能由對應腳本產生。
+#
+# 這個開口不影響防護：檢查點不含任何秘密（權杖禁止寫入，見 orchestrator.md），
+# 也不是任何一道防線的依據；而 `.harness/progress/../locked-tests.list` 這種
+# 路徑戲法會先被 _to_repo_relative() 正規化成 `.harness/locked-tests.list`，
+# 仍然擋得下來。
+HARNESS_PROGRESS_PREFIX = ".harness/progress"
 
 
 def _repo_root() -> Path:
@@ -320,6 +331,10 @@ def _is_harness_path(rel) -> bool:
     if rel is None:
         return False
     normalized = rel.rstrip("/")
+    if normalized == HARNESS_PROGRESS_PREFIX or normalized.startswith(
+        HARNESS_PROGRESS_PREFIX + "/"
+    ):
+        return False
     return normalized == HARNESS_DIR_PREFIX or normalized.startswith(HARNESS_DIR_PREFIX + "/")
 
 
