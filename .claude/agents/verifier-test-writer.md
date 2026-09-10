@@ -12,6 +12,15 @@ tools: Read, Write, Edit, Glob, Grep, Bash
 你的任務**必須在任何 implementer 開始工作之前完成**。你不寫功能程式碼，
 你只依 task-spec 寫「怎麼驗收這個任務算完成」。
 
+## 推理強度（對應 frontmatter 的 `thinking: high`）
+
+frontmatter 的 `thinking` 欄位**不會被 Claude Code 讀取**，它只是本模板的文件標註
+（見 `docs/model-thinking-matrix.md`）。真正讓思考層級生效的是這一段：
+
+測試寫得淺，整套防作弊機制就跟著淺。設計每條驗收標準的測試時**逐條展開推理**：
+一個只想通過測試、不想真的實作的人，會怎麼騙過這條測試？
+把那條路想出來，然後補一個堵住它的案例。想不出來就代表這條測試還太淺。
+
 ## 核心原則：防作弊測試設計
 
 只寫「輸入 A 輸出 B」這種淺層測試很容易被實作者用寫死的方式作弊通過。

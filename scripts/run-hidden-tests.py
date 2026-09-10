@@ -45,6 +45,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import attempts  # noqa: E402
 import hidden_vault as vault  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -89,6 +90,34 @@ def list_tasks(manifest: dict) -> int:
     print("  python3 scripts/run-hidden-tests.py --task-id <task_id> --token <權杖>")
     print("===== 結束 =====")
     return 0
+
+
+def _record_attempt(task_id: str, passed: bool, note=None) -> None:
+    """把這一次的驗收結果記進 .harness/attempts.json（P3-5）。
+
+    由**執行測試的這一方**記錄，不是由被測的那一方——停損規則靠 implementer
+    自我申報的話，在它最該生效的那一輪（實作者卡住、開始亂試）最不會生效。
+
+    記錄失敗不影響驗收結果：這是輔助資訊，唯讀檔案系統不該讓一次合法的驗收
+    變成錯誤。所以這裡吞掉例外，只印一行提示。
+    """
+    try:
+        path = attempts.record(task_id, passed, note=note)
+        info = attempts.summary(task_id)
+    except Exception as exc:  # noqa: BLE001 — 記錄失敗不該中斷驗收
+        print(f"（嘗試次數未能記錄：{type(exc).__name__}: {exc}）")
+        return
+
+    if path is None:
+        print("（嘗試次數未能寫入 .harness/attempts.json，本次結果不會計入停損判斷）")
+        return
+
+    if info["should_stop"]:
+        print(f"⚠️ 這個 task 已連續失敗 {info['consecutive_failures']} 次"
+              f"（門檻 {info['threshold']}）——依停損規則，Orchestrator 應該介入"
+              "檢視 task-spec 是否有問題，而不是再派一輪。")
+    for warning in info["warnings"]:
+        print(f"（{warning}）")
 
 
 def main() -> int:
@@ -208,14 +237,17 @@ def main() -> int:
             print("    沒有 __init__.py 的子目錄——把隱藏測試平鋪在暫存區第一層即可")
             print("  - harness.config.json 的 hidden_test_command 檔名樣式跟實際檔名對不上")
             print("這不是「通過」，請當成驗收未完成處理，修好之後重新封存再跑一次。")
+            _record_attempt(args.task_id, False, "零測試假通過")
             return 1
         if result.returncode == 0:
             print("狀態：隱藏測試全部通過。")
             print(f"（解密了 {len(info.get('files', []))} 個隱藏測試檔案；"
                   "請順帶確認上面的測試數量看起來合理）")
+            _record_attempt(args.task_id, True)
             return 0
         print(f"狀態：隱藏測試未全部通過（測試指令 exit code = {result.returncode}）。")
         print("請把失敗的測試名稱與訊息寫進驗收報告；不要把隱藏測試的原始碼貼進報告。")
+        _record_attempt(args.task_id, False, f"測試指令 exit code = {result.returncode}")
         return 1
     finally:
         shutil.rmtree(workdir, ignore_errors=True)

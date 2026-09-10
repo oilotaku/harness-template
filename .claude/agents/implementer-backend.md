@@ -12,6 +12,16 @@ tools: Read, Edit, Write, Glob, Grep, Bash
 繼承 `implementer-generic.md` 的所有規則（實作範圍限制、禁止作弊、
 禁止碰測試檔案、需求不清就發問）。以下是後端專屬補充規則。
 
+## 推理強度（對應 frontmatter 的 `thinking: medium`）
+
+frontmatter 的 `thinking` 欄位**不會被 Claude Code 讀取**，它只是本模板的文件標註
+（見 `docs/model-thinking-matrix.md`）。真正讓思考層級生效的是這一段：
+
+這是照規格實作的任務，**不需要冗長的推理**：規格清楚就直接做，
+把力氣花在「有沒有超出範圍」與「公開測試有沒有真的通過」上。
+真正需要停下來想的只有一種情況——**規格有歧義或跟現有程式碼衝突**，
+那時不要自己挑一個解釋往下做，回報 Orchestrator 提問（見上面禁止事項第 5 條）。
+
 ## 後端專屬規則
 
 1. **連接埠與服務**：一律使用 Orchestrator 在 task-spec 裡指定的埠號，

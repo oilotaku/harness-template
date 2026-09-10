@@ -165,6 +165,81 @@ def check_config() -> None:
         print("詳見 docs/multi-language-support.md。")
 
 
+# 一個目錄要被視為「已知不受保護」，只要它自己寫明這件事就好——
+# 修正動作與承認動作是同一件事：把「這裡不受保護」寫下來給下一個讀到的人看。
+ACK_MARKER = "不受保護"
+ACK_FILES = ("README.md", "readme.md")
+
+
+def _acknowledged(directory: Path) -> bool:
+    for name in ACK_FILES:
+        candidate = directory / name
+        if not candidate.exists():
+            continue
+        try:
+            if ACK_MARKER in candidate.read_text(encoding="utf-8", errors="replace"):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def check_unprotected_hidden_dirs() -> None:
+    """找出「看起來是隱藏測試目錄、但不在受保護路徑內」的位置（P1-3）。
+
+    這是原本 stray 偵測漏掉的一半：舊的偵測只在「設定的測試目錄一個都不存在」時
+    才跑，所以像 monorepo 那樣**設定的目錄存在、但另外還有第二個 tests/hidden**
+    的情況永遠不會被發現——使用者照著範例的目錄結構套進子專案，會以為有保護。
+
+    刻意的設計：目錄裡的 README 只要寫明「不受保護」就不再警告。
+    否則這個檢查會在每個 session 都對著同一個刻意留著的示範目錄大喊，
+    而一個總是在響的警告等於沒有警告（那正是 P3-1 修掉的失效方式）。
+    """
+    try:
+        patterns = harness_config.load(REPO_ROOT)["hidden_test_paths"]
+    except harness_config.ConfigError:
+        return  # 設定壞掉的訊息由 check_config() 負責，這裡不重複吵
+
+    tails = {pattern.rstrip("/").split("/")[-1] for pattern in patterns if pattern.strip("/")}
+    if not tails:
+        return
+
+    # 這裡不沿用 SCAN_SKIP_DIRS：那份清單為了避免雜訊而跳過 templates/，
+    # 但「範例目錄示範了一個看起來受保護、實際不受保護的結構」正是 P1-3 的原始問題，
+    # 不該被跳過。改用 README 承認機制處理雜訊，而不是整個目錄視而不見。
+    skip_dirs = SCAN_SKIP_DIRS - {"templates"}
+
+    findings = []
+    for path in REPO_ROOT.rglob("*"):
+        if len(findings) >= 5:
+            break
+        if not path.is_dir() or path.name not in tails:
+            continue
+        rel = path.relative_to(REPO_ROOT)
+        if any(part in skip_dirs for part in rel.parts):
+            continue
+        if harness_config.matches(rel.as_posix() + "/probe.py", patterns):
+            continue  # 在受保護路徑內，正常
+        if not any(
+            any(fnmatch.fnmatch(child.name, pattern) for pattern in TEST_FILE_PATTERNS)
+            for child in path.rglob("*")
+            if child.is_file()
+        ):
+            continue  # 空目錄不算，沒有東西可以外洩
+        if _acknowledged(path):
+            continue
+        findings.append(rel.as_posix())
+
+    if findings:
+        print()
+        print("⚠️ 這些目錄看起來是隱藏測試，但**不在受保護路徑內**：")
+        for rel in findings:
+            print(f"    {rel}/")
+        print("放在這裡的隱藏測試任何人都讀得到——鎖定與封存機制碰不到它們。")
+        print(f"處理方式二選一：把它納入 {harness_config.CONFIG_FILENAME} 的 hidden_test_paths，")
+        print("或在該目錄放一份 README 寫明它「不受保護」（示範用途就屬於後者）。")
+
+
 def check_locks() -> None:
     if not VERIFY_LOCKS.exists():
         return
@@ -209,6 +284,7 @@ def main() -> int:
         print(f"防護正常：{len(PROBES)}/{len(PROBES)} 項檢查符合預期（隱藏測試讀寫皆被擋、一般檔案不受影響）。")
 
     check_config()
+    check_unprotected_hidden_dirs()
     check_locks()
     print("===== 結束 =====")
     return 0
