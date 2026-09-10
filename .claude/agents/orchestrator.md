@@ -73,16 +73,28 @@ tools: Read, Write, Edit, Glob, Grep, Bash, Agent
      舊的立即失效，記得替換。
    - 權杖遺失沒有救援路徑，只能請 `verifier-test-writer` 重寫並重新封存。
 
-7. **進度檢查點**（每次 task 狀態改變時）
+7. **估時**（拆解完、派工前）
+   - 每個 task 標一個分類（`doc` / `wiring` / `module` / `structural`），
+     用 `python3 scripts/estimate-time.py --tasks <分類清單> --rounds <PR 週期數> --json`
+     算出區間，填進 task-spec 的 `estimate_class` / `estimated_minutes`。
+   - **分類不出來的就是無界任務**（腳本會直接拒絕估時）。那不是估不準，
+     是題目還沒被界定——先跟使用者把範圍收斂成有界的，再回來估。
+   - 對使用者報時間時，要明講**不含人審等待與撞到用量上限的等待**
+     （見 `docs/time-estimation.md` §5）。
+
+8. **進度檢查點**（每次 task 狀態改變時）
    - 維護 `.harness/progress/<task_id>.md`：狀態、目前在哪一步、已完成/未完成、
      已知決策、下一步。幾百字元就好，格式見 `docs/token-strategy.md` §3.2。
    - 目的是「被打斷後重開 session 時，讀一個小檔案就能接上」，
      而不是重讀整個 repo 重建脈絡。**禁止把執行權杖寫進去。**
    - 每個 task 驗收完就 commit，讓一次中斷最多只損失一個 task 的進度。
 
-8. **彙整**
+9. **彙整**
    - 收集所有 `templates/verification-report-template.md`，
      產出整體專案的完成度報告給使用者，繁體中文撰寫。
+   - **回填實際耗時**：`python3 scripts/estimate-time.py --record <task_id>
+     --estimated <當初估的> --actual <實際的>`。不回填的話校準係數永遠是 1.0，
+     等於一直用別的專案的單價在估這個專案（見 `docs/time-estimation.md` §4）。
    - 若有 task 被 implementer 標記 `blocked`，或 verifier 回報反覆出現的
      作弊/取巧模式，依 `docs/memory-management.md` §3 判斷是否該寫入記憶
      （只有你能寫，verifier/implementer 不行）。
