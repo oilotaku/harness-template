@@ -21,9 +21,9 @@
    → 產出 tests/hidden/*（不會交給實作者）
    → 產出「驗收標準對照表」
         │
-        ▼（執行 `python3 scripts/lock-tests.py`，鎖定 tests/public 並寫入
-            .harness/locked-tests.list——這一步是實際的技術強制力來源，
-            不是單純的文件約定）
+        ▼（執行 `python3 scripts/lock-tests.py`，鎖定 tests/public 並把
+            「路徑 + sha256」寫入 .harness/locked-tests.list——這一步是實際的
+            技術強制力來源，不是單純的文件約定）
 3. implementer-* 讀 task-spec + tests/public/*
    → 只能新增/修改功能程式碼，不能碰 tests/
    → 完成後產出「實作說明」+ 自我聲明「未修改任何測試檔案」
@@ -57,6 +57,15 @@
 4. **獨立驗證鏈**：`verifier-reviewer` 與 `implementer-*` 是不同 session，
    不共用上下文，驗收時是「從零重新審視」而不是延續實作者的思路
    （對應 SE-CoVe 獨立驗證鏈的精神）。
+5. **事後稽核（不依賴攔截是否成功）**：上面第 3 點是「事前攔截」，而事前攔截
+   有兩個先天弱點——它靠列舉路徑寫法來判斷，總會有沒想到的繞法；而且它是 hook，
+   只要沒被執行到（找不到 `python3`、hook 設定被改掉、工作目錄不對），防護就等於
+   不存在。因此 `lock-tests.py` 會把每個公開測試的 **sha256** 一起寫進清單，
+   `verifier-reviewer` 驗收的第一步跑 `scripts/verify-locks.py` 重算比對：
+   不管前面有沒有被繞過，只要公開測試在鎖定之後被動過，這裡就會發現。
+   另外 `guard-hidden-tests.py` 本身是 **fail-closed** 的（腳本自己出錯或收到
+   看不懂的輸入時擋下操作而不是放行），`guard-selfcheck.py` 則在每個 session
+   開始時實際跑幾個「已知該被擋」的 payload，確認防護這次真的有生效。
 
 ## 邊界情況處理
 

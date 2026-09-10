@@ -16,7 +16,7 @@
     `diff a.py b.py 2>&1` 這種純讀取、只是把 stderr 併進 stdout 的
     無關重導向被誤判成寫入而擋下
 
-這版改成：先用 shell 分隔符號（`;` `&&` `||` `|` 換行）把指令切成多個
+第二版改成：先用 shell 分隔符號（`;` `&&` `||` `|` 換行）把指令切成多個
 「簡單指令」segment，對每個 segment 用 shlex 斷詞，並追蹤 `cd` 造成的
 虛擬工作目錄，藉此把相對路徑正確解析成相對於 repo 根目錄的路徑，
 再判斷該路徑是否落在受保護路徑之下（用路徑元件比對，而不是子字串比對）。
@@ -40,6 +40,26 @@
    （hook 無法區分呼叫者），因此它必須靠**執行**測試而不是打開檔案來
    驗收，細節見 `.claude/agents/verifier-reviewer.md`。
 
+歷史（2026-09-10 第三版，對應 docs/improvement-suggestions.md 的 P0-1 與 P0-5）：
+第二版有兩條路徑在做同一件事卻用了不同標準——Bash 分支會先把相對路徑正規化
+再比對，但 Edit/Write/Read/Grep/Glob 分支只把反斜線換成正斜線，然後直接對
+"tests/hidden" 做字串前綴比對。結果是同一個檔案換個寫法就擋不到（實測）：
+  - `/abs/path/repo/tests/hidden/x.py`——而 Read 工具的 file_path 規定
+    就是要絕對路徑，等於「不能看到隱藏測試」這條保護在正常用法下完全無效
+  - `./tests/hidden/x.py`、`tests//hidden/x.py`、`tests/../tests/hidden/x.py`
+  - 已鎖定的公開測試同樣可以用絕對路徑覆寫
+這版把所有分支統一走 `_to_repo_relative()`：吸收反斜線、`./`、多重斜線、`..`
+與絕對路徑，一律換算成「相對於 repo 根目錄」的路徑後再比對；換算結果落在
+repo 之外時回傳 None，代表不歸本 hook 管（例如 `/etc/hosts`）。
+
+同一版也把腳本改成 **fail-closed**：第二版只要腳本自己丟出任何例外、或收到
+無法解析的 stdin，都會以非 2 的 exit code 結束，而 Claude Code 只把 exit code 2
+當成 blocking error——也就是說防護壞掉的時候是「全開」的，而且沒有任何訊號。
+現在未預期的例外與無法解析的輸入一律 exit 2 並說明原因。
+注意：腳本「根本沒被執行到」（找不到 python3、hook 路徑寫錯）這種情況，
+腳本自己救不了，靠 `scripts/guard-selfcheck.py`（SessionStart hook）在 session
+一開始就驗證防護是否真的生效，以及 `scripts/verify-locks.py` 的事後雜湊稽核。
+
 Claude Code 會把這次工具呼叫的資訊以 JSON 透過 stdin 傳入本腳本。
 - Edit/Write 等工具的目標路徑在 tool_input.file_path。
 - Bash 工具的指令字串在 tool_input.command。
@@ -47,15 +67,34 @@ Claude Code 會把這次工具呼叫的資訊以 JSON 透過 stdin 傳入本腳�
   分別看 tool_input.file_path / tool_input.path / tool_input.glob。
 """
 import json
+import os
 import re
 import shlex
 import sys
 from pathlib import Path
 
-LOCKED_LIST = Path(".harness/locked-tests.list")
-
 HIDDEN_TESTS_PREFIX = "tests/hidden"
 HARNESS_DIR_PREFIX = ".harness"
+
+
+def _repo_root() -> Path:
+    """repo 根目錄。優先用 Claude Code 提供的 CLAUDE_PROJECT_DIR，沒有才退回 cwd。
+
+    hook 不保證以 repo 根目錄當工作目錄執行，一旦 cwd 不是 repo 根，
+    「相對路徑比對」就會整組對不上，所以這裡一律換算成絕對路徑當基準。
+    （本函式在 lock-tests.py / verify-locks.py / guard-selfcheck.py 各有一份
+    相同實作，是刻意重複——這些腳本必須能被 hook 直接執行，不應該依賴
+    彼此的 import 路徑。）
+    """
+    raw = os.environ.get("CLAUDE_PROJECT_DIR") or "."
+    try:
+        return Path(raw).resolve()
+    except OSError:
+        return Path.cwd()
+
+
+REPO_ROOT = _repo_root()
+LOCKED_LIST = REPO_ROOT / ".harness" / "locked-tests.list"
 
 # 這些工具只要目標落在 tests/hidden/ 之下就一律擋（讀寫都擋，見模組說明）。
 READ_TOOL_PATH_FIELDS = {
@@ -85,42 +124,104 @@ INLINE_FLAGS = {"-c", "-e"}
 SEGMENT_SPLIT = re.compile(r"&&|\|\||[;\n]|(?<!\|)\|(?!\|)")
 REDIRECT_PATTERN = re.compile(r"(?:^|\s)\d*>{1,2}\s*(\S+)")
 
+SHA256_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
+
 
 def _normalize(path: str) -> str:
     return path.replace("\\", "/")
 
 
+def _to_repo_relative(raw: str, cwd: str = ""):
+    """把任何寫法的路徑換算成「相對於 repo 根目錄」的 posix 路徑。
+
+    吸收反斜線、`./`、多重斜線、`..` 與絕對路徑——第二版就是因為
+    Edit/Write/Read 這條路徑少了這一步，才會被絕對路徑整組繞過（P0-1）。
+
+    回傳值：
+      - 字串：repo 相對路徑（`""` 代表 repo 根目錄本身）
+      - None：落在 repo 之外或無法解析，不歸本 hook 管
+
+    `cwd` 是已經換算成 repo 相對路徑的虛擬工作目錄（Bash 分支追蹤 `cd` 用）；
+    傳入 None 代表虛擬工作目錄已經切到 repo 之外，其下的相對路徑一律不歸本 hook 管。
+    """
+    if cwd is None:
+        return None
+    token = _normalize(raw).strip().strip("\"'")
+    if not token:
+        return None
+
+    candidate = Path(token)
+    if not candidate.is_absolute():
+        candidate = (REPO_ROOT / cwd / token) if cwd else (REPO_ROOT / token)
+
+    try:
+        resolved = candidate.resolve()
+    except OSError:
+        return None
+
+    try:
+        relative = resolved.relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return None
+
+    return "" if relative == "." else relative
+
+
+def _parse_locked_line(line: str):
+    """解析鎖定清單的一行，回傳路徑（沒有內容就回傳 None）。
+
+    支援兩種格式：
+      - 新格式（P1-2 起）：`<sha256>  <路徑>`，雜湊由 verify-locks.py 事後稽核用
+      - 舊格式：純路徑一行一個（沒有雜湊，仍然可以擋寫入，只是無法事後驗證）
+    """
+    line = line.strip()
+    if not line or line.startswith("#"):
+        return None
+    parts = line.split(None, 1)
+    if len(parts) == 2 and SHA256_PATTERN.match(parts[0]):
+        return parts[1].strip().replace("\\", "/")
+    return line.replace("\\", "/")
+
+
 def _load_locked() -> set:
     if not LOCKED_LIST.exists():
         return set()
-    return {
-        line.strip().replace("\\", "/")
-        for line in LOCKED_LIST.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    }
+    locked = set()
+    for line in LOCKED_LIST.read_text(encoding="utf-8").splitlines():
+        path = _parse_locked_line(line)
+        if path:
+            locked.add(path)
+    return locked
 
 
-def _is_hidden_tests_path(path: str) -> bool:
-    normalized = path.rstrip("/")
+def _is_hidden_tests_path(rel) -> bool:
+    if rel is None:
+        return False
+    normalized = rel.rstrip("/")
     return normalized == HIDDEN_TESTS_PREFIX or normalized.startswith(HIDDEN_TESTS_PREFIX + "/")
 
 
-def _is_harness_path(path: str) -> bool:
-    normalized = path.rstrip("/")
+def _is_harness_path(rel) -> bool:
+    if rel is None:
+        return False
+    normalized = rel.rstrip("/")
     return normalized == HARNESS_DIR_PREFIX or normalized.startswith(HARNESS_DIR_PREFIX + "/")
 
 
-def _is_protected_write_target(path: str, locked: set) -> bool:
-    if not path:
+def _is_protected_write_target(rel, locked: set) -> bool:
+    if not rel:
         return False
-    if _is_hidden_tests_path(path) or _is_harness_path(path):
+    if _is_hidden_tests_path(rel) or _is_harness_path(rel):
         return True
-    return path.rstrip("/") in locked
+    return rel.rstrip("/") in locked
 
 
 def _check_file_path(raw_path: str, locked: set, tool_name: str = None):
     """涵蓋 Edit/Write/MultiEdit 等會寫入檔案的工具。"""
-    target = _normalize(raw_path)
+    target = _to_repo_relative(raw_path)
+    if target is None:
+        # 落在 repo 之外的路徑不歸本 hook 管（例如 /tmp、使用者家目錄）。
+        return None
 
     if _is_hidden_tests_path(target):
         # 只擋「修改/覆蓋既有檔案」，不擋「第一次建立」——否則連合法的
@@ -128,7 +229,7 @@ def _check_file_path(raw_path: str, locked: set, tool_name: str = None):
         # 無法啟動。Edit 工具本來就只能對已存在的檔案操作，天然只會落在
         # 「檔案已存在」這個會被擋下的分支；Write 工具則額外檢查檔案是否
         # 已存在來分辨「建立」與「覆蓋」。
-        if tool_name == "Write" and not Path(target).exists():
+        if tool_name == "Write" and not (REPO_ROOT / target).exists():
             return None
         return "拒絕：不可修改（或用 Write 覆蓋已存在的）tests/hidden/ 底下的檔案。"
 
@@ -152,37 +253,12 @@ def _check_read_tool(tool_name: str, tool_input: dict):
         return None
     for field in fields:
         value = tool_input.get(field)
-        if isinstance(value, str) and value and _is_hidden_tests_path(_normalize(value)):
+        if isinstance(value, str) and value and _is_hidden_tests_path(_to_repo_relative(value)):
             return (
                 "拒絕：實作者子智能體不可讀取或搜尋 tests/hidden/ 目錄"
                 "（隱藏驗收測試，黃金法則第 1 條——不能修改，也不能看到）。"
             )
     return None
-
-
-def _resolve(cwd: str, token: str) -> str:
-    """把 token 相對 cwd 解析成正規化路徑（用來判斷是否落在受保護路徑下，
-    不處理跳出 repo 之外的絕對路徑語意）。"""
-    token = token.strip()
-    if not token:
-        return ""
-    if token.startswith("/"):
-        combined = token
-    elif cwd:
-        combined = f"{cwd}/{token}"
-    else:
-        combined = token
-
-    parts = []
-    for part in combined.split("/"):
-        if part in ("", "."):
-            continue
-        if part == "..":
-            if parts:
-                parts.pop()
-            continue
-        parts.append(part)
-    return "/".join(parts)
 
 
 def _strip_prefixes(tokens):
@@ -216,7 +292,7 @@ def _check_bash_command(command: str, locked: set):
     normalized = _normalize(command)
     segments = [s for s in SEGMENT_SPLIT.split(normalized) if s.strip()]
 
-    cwd = ""
+    cwd = ""  # repo 相對的虛擬工作目錄；None 代表已經切到 repo 之外
     for raw_segment in segments:
         try:
             tokens = shlex.split(raw_segment, posix=True)
@@ -230,7 +306,7 @@ def _check_bash_command(command: str, locked: set):
         args = tokens[1:]
 
         if verb == "cd" and args:
-            cwd = _resolve(cwd, args[0])
+            cwd = _to_repo_relative(args[0], cwd)
             continue
 
         # 寫入類候選：受完整保護（tests/hidden/ + .harness/ + 已鎖定的公開測試）。
@@ -259,8 +335,7 @@ def _check_bash_command(command: str, locked: set):
             read_candidates.extend(a for a in args if not a.startswith("-"))
 
         for target in write_candidates:
-            resolved = _resolve(cwd, target)
-            if _is_protected_write_target(resolved, locked):
+            if _is_protected_write_target(_to_repo_relative(target, cwd), locked):
                 return (
                     "拒絕：偵測到 Bash 指令對受保護路徑（tests/hidden/、.harness/ 或"
                     f"已鎖定的公開測試）執行了寫入類操作（`{verb}` 目標：「{target}」），"
@@ -269,8 +344,7 @@ def _check_bash_command(command: str, locked: set):
                 )
 
         for target in read_candidates:
-            resolved = _resolve(cwd, target)
-            if _is_hidden_tests_path(resolved):
+            if _is_hidden_tests_path(_to_repo_relative(target, cwd)):
                 return (
                     "拒絕：偵測到 Bash 指令讀取/搜尋 tests/hidden/ 目錄"
                     f"（`{verb}` 目標：「{target}」），一律擋下（黃金法則第 1 條——"
@@ -279,8 +353,7 @@ def _check_bash_command(command: str, locked: set):
                 )
 
         for target in _extract_redirect_targets(raw_segment):
-            resolved = _resolve(cwd, target)
-            if _is_protected_write_target(resolved, locked):
+            if _is_protected_write_target(_to_repo_relative(target, cwd), locked):
                 return (
                     "拒絕：偵測到 Bash 指令用重導向（>/>>）寫入受保護路徑"
                     f"（目標：「{target}」），一律擋下。若為誤判，請改用不涉及這些路徑的"
@@ -303,42 +376,73 @@ def _check_bash_command(command: str, locked: set):
     return None
 
 
-def main() -> None:
-    try:
-        payload = json.loads(sys.stdin.read())
-    except json.JSONDecodeError:
-        sys.exit(0)
-
-    if not isinstance(payload, dict):
-        # 合法 JSON 但不是物件（例如 null、陣列、數字），視為不適用本檢查，放行。
-        sys.exit(0)
-
+def check_payload(payload) -> str:
+    """回傳擋下的理由（字串）或 None（放行）。抽成純函式方便測試直接呼叫。"""
     tool_name = payload.get("tool_name")
     tool_input = payload.get("tool_input")
     if not isinstance(tool_input, dict):
         tool_input = {}
     locked = _load_locked()
 
-    reason = None
     if tool_name == "Bash":
         command = tool_input.get("command")
         if isinstance(command, str) and command:
-            reason = _check_bash_command(command, locked)
-    elif tool_name in READ_TOOL_PATH_FIELDS:
-        reason = _check_read_tool(tool_name, tool_input)
-    else:
-        raw_path = tool_input.get("file_path")
-        if isinstance(raw_path, str) and raw_path:
-            reason = _check_file_path(raw_path, locked, tool_name)
+            return _check_bash_command(command, locked)
+        return None
 
+    if tool_name in READ_TOOL_PATH_FIELDS:
+        return _check_read_tool(tool_name, tool_input)
+
+    raw_path = tool_input.get("file_path")
+    if isinstance(raw_path, str) and raw_path:
+        return _check_file_path(raw_path, locked, tool_name)
+
+    return None
+
+
+def _block(reason: str) -> None:
+    print(reason, file=sys.stderr)
+    # exit code 2 才會被 Claude Code 視為 blocking error 並真正擋下工具呼叫；
+    # exit code 1 只是 non-blocking error，動作仍會繼續執行。
+    sys.exit(2)
+
+
+def main() -> None:
+    raw = sys.stdin.read()
+
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        # fail-closed：舊版這裡是 exit 0（放行）。但「收到看不懂的輸入」代表
+        # 這支腳本對這次工具呼叫失去判斷能力，放行等於在防護失效時默默全開。
+        _block(
+            "拒絕：防護腳本收到無法解析的輸入（stdin 不是合法 JSON），"
+            "無法判斷這次工具呼叫是否碰到受保護路徑，為安全起見擋下。"
+        )
+
+    if not isinstance(payload, dict):
+        _block(
+            "拒絕：防護腳本收到非預期的輸入格式（JSON 最外層不是物件），"
+            "無法判斷這次工具呼叫是否碰到受保護路徑，為安全起見擋下。"
+        )
+
+    reason = check_payload(payload)
     if reason:
-        print(reason, file=sys.stderr)
-        # exit code 2 才會被 Claude Code 視為 blocking error 並真正擋下工具呼叫；
-        # exit code 1 只是 non-blocking error，動作仍會繼續執行。
-        sys.exit(2)
+        _block(reason)
 
     sys.exit(0)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except BaseException as exc:  # noqa: BLE001 — 刻意攔截全部：防護腳本必須 fail-closed
+        print(
+            f"拒絕：防護腳本發生未預期錯誤（{type(exc).__name__}: {exc}），為安全起見擋下本次操作。"
+            "這代表防作弊機制目前不可信，請先修復 scripts/guard-hidden-tests.py"
+            "（可用 python3 scripts/test-guards.py 確認）再繼續。",
+            file=sys.stderr,
+        )
+        sys.exit(2)

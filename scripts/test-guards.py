@@ -15,7 +15,9 @@ stdin payload，斷言 exit code 符合預期。
 
 用法：python3 scripts/test-guards.py
 """
+import hashlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -34,19 +36,45 @@ def case(name):
     return deco
 
 
-def run_guard(cwd: Path, payload) -> subprocess.CompletedProcess:
+def run_guard(cwd: Path, payload, raw_stdin: str = None) -> subprocess.CompletedProcess:
+    # 一律明確指定 CLAUDE_PROJECT_DIR，否則會繼承外層 Claude Code session 的值，
+    # 讓 guard 拿真正的專案目錄當基準，測試就會全部對不上暫存情境。
     return subprocess.run(
         [sys.executable, str(GUARD_SCRIPT)],
-        input=json.dumps(payload),
+        input=raw_stdin if raw_stdin is not None else json.dumps(payload),
         text=True,
         capture_output=True,
         cwd=cwd,
+        env={**os.environ, "CLAUDE_PROJECT_DIR": str(cwd)},
     )
 
 
 def lock(tmp: Path, *paths: str) -> None:
+    """寫入舊格式（純路徑）鎖定清單，確保向後相容仍然有效。"""
     (tmp / ".harness").mkdir(exist_ok=True)
     (tmp / ".harness" / "locked-tests.list").write_text("\n".join(paths) + "\n")
+
+
+def lock_with_hash(tmp: Path, *paths: str) -> None:
+    """寫入新格式（`<sha256>  <路徑>`）鎖定清單，比照 lock-tests.py 的輸出。"""
+    (tmp / ".harness").mkdir(exist_ok=True)
+    lines = []
+    for path in paths:
+        target = tmp / path
+        digest = (
+            hashlib.sha256(target.read_bytes()).hexdigest()
+            if target.is_file()
+            else "0" * 64
+        )
+        lines.append(f"{digest}  {path}")
+    (tmp / ".harness" / "locked-tests.list").write_text("\n".join(lines) + "\n")
+
+
+def touch(tmp: Path, path: str, content: str = "assert True\n") -> Path:
+    target = tmp / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+    return target
 
 
 # ---------------------------------------------------------------- Edit/Write
@@ -122,47 +150,20 @@ def _(tmp: Path):
     assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
 
 
-@case("缺 file_path 應放行（fail open）")
+@case("缺 file_path 應放行（payload 合法，只是沒有可判斷的目標）")
 def _(tmp: Path):
     result = run_guard(tmp, {"tool_name": "Edit", "tool_input": {}})
     assert result.returncode == 0, f"exit={result.returncode} stderr={result.stderr}"
 
 
-@case("malformed JSON 應放行（fail open）")
+@case("合法但非物件的 JSON（null）應 fail-closed 且不噴未處理例外")
 def _(tmp: Path):
-    result = subprocess.run(
-        [sys.executable, str(GUARD_SCRIPT)],
-        input="not json",
-        text=True,
-        capture_output=True,
-        cwd=tmp,
-    )
-    assert result.returncode == 0, f"exit={result.returncode} stderr={result.stderr}"
-
-
-@case("合法但非物件的 JSON（null）應放行且不噴未處理例外")
-def _(tmp: Path):
-    result = subprocess.run(
-        [sys.executable, str(GUARD_SCRIPT)],
-        input="null",
-        text=True,
-        capture_output=True,
-        cwd=tmp,
-    )
-    assert result.returncode == 0, f"exit={result.returncode} stderr={result.stderr}"
+    # 2026-09-10（P0-5）行為變更：這三種「看不懂的輸入」以前是放行（fail open），
+    # 現在一律擋下。理由見 guard-hidden-tests.py 模組說明——腳本對這次呼叫
+    # 已經失去判斷能力，放行等於在防護失效時默默全開，而且沒有任何訊號。
+    result = run_guard(tmp, None, raw_stdin="null")
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
     assert "Traceback" not in result.stderr, f"不該有未處理例外：{result.stderr}"
-
-
-@case("合法但非物件的 JSON（陣列）應放行")
-def _(tmp: Path):
-    result = subprocess.run(
-        [sys.executable, str(GUARD_SCRIPT)],
-        input="[1, 2, 3]",
-        text=True,
-        capture_output=True,
-        cwd=tmp,
-    )
-    assert result.returncode == 0, f"exit={result.returncode} stderr={result.stderr}"
 
 
 # --------------------------------------------------------------------- Bash
@@ -344,6 +345,135 @@ def _(tmp: Path):
     result = run_guard(
         tmp, {"tool_name": "Glob", "tool_input": {"pattern": "*.py", "path": "tests/hidden"}}
     )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+# ------------------------------------------------- P0-1：路徑寫法正規化（2026-09-10）
+#
+# 以下這批案例對應 docs/improvement-suggestions.md 的 P0-1：第二版的
+# Edit/Write/Read/Grep/Glob 分支只做字串前綴比對，因此絕對路徑、`./`、`//`、`..`
+# 這些寫法全部擋不到。其中「絕對路徑」尤其嚴重——Read 工具的 file_path 規定
+# 就是要絕對路徑，等於讀取保護在正常用法下完全失效。
+
+
+@case("P0-1 Read 用絕對路徑讀 tests/hidden/ 應被擋（Read 工具規定就是絕對路徑）")
+def _(tmp: Path):
+    result = run_guard(
+        tmp,
+        {"tool_name": "Read", "tool_input": {"file_path": str(tmp / "tests/hidden/test_x.py")}},
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-1 Read 用 ./ 前綴讀 tests/hidden/ 應被擋")
+def _(tmp: Path):
+    result = run_guard(
+        tmp, {"tool_name": "Read", "tool_input": {"file_path": "./tests/hidden/test_x.py"}}
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-1 Read 用雙斜線 tests//hidden/ 應被擋")
+def _(tmp: Path):
+    result = run_guard(
+        tmp, {"tool_name": "Read", "tool_input": {"file_path": "tests//hidden/test_x.py"}}
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-1 Read 用 ../ 迂迴回 tests/hidden/ 應被擋")
+def _(tmp: Path):
+    result = run_guard(
+        tmp,
+        {"tool_name": "Read", "tool_input": {"file_path": "tests/../tests/hidden/test_x.py"}},
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-1 Write 用絕對路徑覆寫已鎖定的公開測試應被擋")
+def _(tmp: Path):
+    touch(tmp, "tests/public/test_p.py")
+    lock_with_hash(tmp, "tests/public/test_p.py")
+    result = run_guard(
+        tmp,
+        {"tool_name": "Write", "tool_input": {"file_path": str(tmp / "tests/public/test_p.py")}},
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-1 Edit 用絕對路徑修改 tests/hidden/ 應被擋")
+def _(tmp: Path):
+    result = run_guard(
+        tmp,
+        {"tool_name": "Edit", "tool_input": {"file_path": str(tmp / "tests/hidden/test_x.py")}},
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-1 Bash cat 用絕對路徑讀 tests/hidden/ 應被擋")
+def _(tmp: Path):
+    result = run_guard(
+        tmp,
+        {"tool_name": "Bash", "tool_input": {"command": f"cat {tmp / 'tests/hidden/test_x.py'}"}},
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-1 repo 之外的絕對路徑不歸本 hook 管，應放行")
+def _(tmp: Path):
+    # 另一個專案自己的 tests/hidden/ 不該被這個 repo 的 hook 擋下來。
+    outside = tmp.parent / "another-project" / "tests" / "hidden" / "test_x.py"
+    result = run_guard(tmp, {"tool_name": "Read", "tool_input": {"file_path": str(outside)}})
+    assert result.returncode == 0, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-1 cd 到 repo 之外後的相對路徑應放行（不是本 repo 的隱藏測試）")
+def _(tmp: Path):
+    result = run_guard(
+        tmp,
+        {"tool_name": "Bash", "tool_input": {"command": "cd .. && cat tests/hidden/test_x.py"}},
+    )
+    assert result.returncode == 0, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-1 新格式（含 sha256）鎖定清單一樣能擋下對公開測試的寫入")
+def _(tmp: Path):
+    touch(tmp, "tests/public/test_p.py")
+    lock_with_hash(tmp, "tests/public/test_p.py")
+    result = run_guard(
+        tmp, {"tool_name": "Edit", "tool_input": {"file_path": "tests/public/test_p.py"}}
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-1 新格式鎖定清單仍允許讀取公開測試（鎖定只限制寫入）")
+def _(tmp: Path):
+    touch(tmp, "tests/public/test_p.py")
+    lock_with_hash(tmp, "tests/public/test_p.py")
+    result = run_guard(
+        tmp, {"tool_name": "Bash", "tool_input": {"command": "cat tests/public/test_p.py"}}
+    )
+    assert result.returncode == 0, f"exit={result.returncode} stderr={result.stderr}"
+
+
+# ------------------------------------------------- P0-5：fail-closed（2026-09-10）
+
+
+@case("P0-5 stdin 不是合法 JSON 時應 fail-closed（擋下而非放行）")
+def _(tmp: Path):
+    result = run_guard(tmp, None, raw_stdin="這不是 JSON")
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-5 stdin 是合法 JSON 但最外層不是物件時應 fail-closed")
+def _(tmp: Path):
+    result = run_guard(tmp, None, raw_stdin="[1, 2, 3]")
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-5 空 stdin 應 fail-closed")
+def _(tmp: Path):
+    result = run_guard(tmp, None, raw_stdin="")
     assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
 
 

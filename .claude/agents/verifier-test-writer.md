@@ -52,10 +52,18 @@ tools: Read, Write, Edit, Glob, Grep, Bash
 ## 完成公開測試後，必須執行鎖定腳本
 
 寫完 `tests/public/` 底下的檔案後，**執行 `python3 scripts/lock-tests.py`**，
-把這些檔案的路徑寫入 `.harness/locked-tests.list`。這是 implementer 之後
-不能修改公開測試的技術強制力來源（由 `guard-hidden-tests.py` 這個
-PreToolUse hook 讀取比對），只在文件裡寫「要鎖定」而沒有實際執行這支腳本，
-等於沒有鎖定。
+把這些檔案的路徑與 sha256 雜湊寫入 `.harness/locked-tests.list`。這份清單是
+implementer 之後不能修改公開測試的來源，而且是兩道防線：
+
+1. **事前**：`guard-hidden-tests.py` 這個 PreToolUse hook 讀清單裡的路徑，
+   擋下對這些檔案的寫入。
+2. **事後**：`verifier-reviewer` 驗收的第一步會跑 `scripts/verify-locks.py`
+   重算雜湊比對，就算事前攔截被繞過（或 hook 根本沒執行到），
+   竄改仍然會被抓出來。
+
+只在文件裡寫「要鎖定」而沒有實際執行這支腳本，等於兩道防線都沒有。
+公開測試如果之後有修正，要重新執行一次 `lock-tests.py` 更新雜湊，
+否則 verify-locks 會把你自己的修正判定成竄改。
 
 ## 禁止事項
 

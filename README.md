@@ -32,9 +32,29 @@
 | `CLAUDE.md` | 全域規則（黃金法則、工作流程總覽） |
 | `.claude/agents/` | 子智能體定義（實作者 3 個、檢驗者 3 個） |
 | `.claude/commands/` | `/task-plan` `/task-dispatch` `/machine-check` 斜線指令 |
-| `scripts/` | `init.py`（一鍵初始化）+ 機器效能、既有服務、環境指紋掃描腳本 |
+| `scripts/` | `init.py`（一鍵初始化）+ 機器效能、既有服務、環境指紋掃描腳本；防作弊機制本體（見下表） |
 | `docs/` | 任務拆解、模型/思考分配、實作/檢驗分離、多語言支援、記憶管理方法論 |
 | `templates/` | task-spec 與驗收報告範本 |
+
+## 防作弊機制的組成
+
+| 腳本 | 角色 | 什麼時候跑 |
+|---|---|---|
+| `scripts/guard-hidden-tests.py` | **事前攔截**：PreToolUse hook，擋下對 `tests/hidden/` 的讀寫、對 `.harness/` 與已鎖定公開測試的寫入 | 每次工具呼叫（由 `.claude/settings.json` 掛上） |
+| `scripts/lock-tests.py` | 把 `tests/public/` 的**路徑 + sha256** 寫進 `.harness/locked-tests.list` | verifier-test-writer 寫完公開測試後 |
+| `scripts/verify-locks.py` | **事後稽核**：重算雜湊比對，抓出「事前攔截被繞過」的竄改 | verifier-reviewer 驗收的第一步 |
+| `scripts/guard-selfcheck.py` | **自我檢查**：用已知該被擋的 payload 實跑一次，確認防護這次真的生效 | SessionStart hook |
+| `scripts/test-guards.py` | guard 的回歸測試（含歷史繞過手法） | 改動 guard 之後 |
+| `scripts/test-locks.py` | lock/verify 的回歸測試 | 改動鎖定機制之後 |
+
+事前攔截一定有極限（見 `docs/improvement-suggestions.md`），所以三層要一起用：
+攔得住最好，攔不住至少事後查得出來，機制壞掉至少會有訊號。
+
+改動任何一支之後，請執行：
+
+```bash
+python3 scripts/test-guards.py && python3 scripts/test-locks.py
+```
 
 ## 設計依據
 

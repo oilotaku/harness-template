@@ -4,8 +4,22 @@
 > `docs/`、`templates/`）。所有標記為【已驗證】的問題，都是實際餵模擬的
 > PreToolUse payload 給 `scripts/guard-hidden-tests.py`、觀察 exit code 得到的結果，
 > 不是只看程式碼推論。重現方式見附錄 A。
->
-> 本檔案只提出建議與修法，**未修改任何既有程式碼**。
+
+---
+
+## 實作進度（2026-09-10 更新）
+
+| 項目 | 狀態 | 落地內容 |
+|---|---|---|
+| P0-1 路徑正規化統一 | ✅ 已修正 | `guard-hidden-tests.py` 全部分支改走 `_to_repo_relative()` |
+| P0-5 fail-closed + hook 掛法 | ✅ 已修正 | 腳本 fail-closed、`$CLAUDE_PROJECT_DIR` + timeout、新增 `guard-selfcheck.py` |
+| P1-2 鎖定清單雜湊稽核 | ✅ 已修正 | `lock-tests.py` 寫入 sha256、新增 `verify-locks.py` 與 `test-locks.py` |
+| P2-4 hook matcher 明確列全 | ✅ 順手修正 | 改 hook 指令時一併把 `MultiEdit`/`NotebookEdit` 寫進 matcher |
+| 其餘 P0-2 / P0-3 / P0-4 / P1-1 / P1-3 / P1-4 / P2 / P3 | ⬜ 未動 | 見下方各節 |
+
+已修正的項目在小節標題標上「✅ 已修正」，內文保留原本的問題描述當作紀錄。
+回歸測試：`python3 scripts/test-guards.py`（42 案例）、
+`python3 scripts/test-locks.py`（12 案例）。
 
 ---
 
@@ -23,11 +37,17 @@
 流程設計、角色分工、文件密度這些部分其實寫得相當完整（比多數同類模板嚴謹），
 問題集中在「機制的實作」與「文件宣稱的保護強度」之間的落差。以下依嚴重度排序。
 
+> **2026-09-10 更新**：本段描述的是修正前的狀態，保留作為紀錄。P0-1（絕對路徑繞過）
+> 與 P0-5（fail-open）已修正，「照正常用法讀隱藏測試不會被擋」這件事已經不成立；
+> 但 P0-2（全 repo 搜尋）、P0-3（`bash -c` 等包裝）、P0-4（把隱藏測試當 oracle 執行）
+> 仍然存在，因此**隱藏測試目前仍不能視為對 implementer 完全不可見**。
+> 在 P1-1 完成之前，防線的實際強度來自 P1-2 的事後稽核，而不是事前攔截。
+
 ---
 
 ## P0 — 防作弊機制實際失效（建議優先處理）
 
-### P0-1. 絕對路徑與 `./`、`//`、`..` 完全繞過路徑比對【已驗證】
+### P0-1. 絕對路徑與 `./`、`//`、`..` 完全繞過路徑比對【已驗證】✅ 已修正
 
 `_check_file_path()` 與 `_check_read_tool()` 拿到路徑後，只做 `_normalize()`
 （把反斜線換成正斜線）就丟給 `_is_hidden_tests_path()` 做**字串前綴比對**，
@@ -65,6 +85,11 @@ def _to_repo_relative(raw: str, cwd: str = "") -> str:
 
 `_check_file_path` / `_check_read_tool` / Bash 分支全部改用它，
 並把上表六個案例加進 `scripts/test-guards.py`。
+
+> **實際落地**：已照此修正。實作與上面草稿有一處差異——落在 repo 之外時回傳
+> `None` 而不是空字串，因為空字串代表「repo 根目錄本身」，兩者必須分得開
+> （`cd` 切到 repo 之外後，其下的相對路徑才不會被誤判成 repo 內的路徑）。
+> 對應測試：`scripts/test-guards.py` 的 `P0-1 *` 案例（含「repo 之外應放行」的反向案例）。
 
 ---
 
@@ -144,7 +169,7 @@ Bash {"command": "python3 -m pytest tests/hidden -q"}   → 放行
 
 ---
 
-### P0-5. hook 是 fail-open，而且掛法依賴 cwd
+### P0-5. hook 是 fail-open，而且掛法依賴 cwd ✅ 已修正
 
 `.claude/settings.json` 的 hook 指令是相對路徑：
 
@@ -171,6 +196,12 @@ Bash {"command": "python3 -m pytest tests/hidden -q"}   → 放行
    並用一個已知該被擋的 payload 跑一次自我測試，失敗就在 session 一開始警告。
 4. fail-open 無法完全消滅，務必同時做 P1-2 的事後雜湊稽核當第二道防線。
 
+> **實際落地**：四點都已照做。第 3 點成為 `scripts/guard-selfcheck.py`，
+> 掛在 `SessionStart`，實跑 6 個 payload（4 個該被擋、1 個 fail-closed、
+> 1 個不該誤擋）並順帶回報鎖定稽核狀態；它一律以 exit 0 結束，只負責回報，
+> 不阻止 session 開始。殘留限制：`python3` 根本不存在時 hook 不會被執行，
+> 這種情況只有 P1-2 的事後稽核抓得到。
+
 ---
 
 ## P1 — 機制設計層級
@@ -195,7 +226,7 @@ P0-1 到 P0-4 有同一個根因：**隱藏測試就躺在 implementer 的工作
 
 這一步做完，P0-1／P0-2／P0-4 大部分自然消失，hook 退化成單純的第二道防線。
 
-### P1-2. `lock-tests.py` 只記路徑，沒記內容雜湊
+### P1-2. `lock-tests.py` 只記路徑，沒記內容雜湊 ✅ 已修正
 
 `.harness/locked-tests.list` 一行一個路徑，沒有任何內容指紋。只要有一條繞過路徑
 成功（P0-1、P0-3 已證明存在多條），公開測試被改了就**沒有任何人會發現**——
@@ -211,6 +242,12 @@ verifier-reviewer 無從知道它跑的公開測試還是不是原本那份。
 
 這是成本最低、CP 值最高的補強：不需要攔截任何東西，只在事後比對，
 而且能兜住 hook fail-open（P0-5）造成的所有漏網之魚。
+
+> **實際落地**：清單改為 `<sha256>  <路徑>`（比照 `sha256sum` 格式），
+> `guard-hidden-tests.py` 兩種格式都讀得懂，舊清單仍能擋寫入。
+> `verify-locks.py` 的 exit code：0 相符、1 竄改或遺失（驗收直接判不通過）、
+> 2 無法驗證（沒有清單或是舊格式，要在報告裡註記）。
+> 對應測試：`scripts/test-locks.py`（12 案例）。
 
 ### P1-3. 範例目錄下的 `tests/hidden/` 完全不受保護
 
@@ -290,7 +327,7 @@ verifier-reviewer 無從知道它跑的公開測試還是不是原本那份。
 
 L1 機械型任務則相反，明講「不需要冗長推理，直接依規格產出」。
 
-### P2-4. hook matcher 靠 regex 巧合命中，不夠明確
+### P2-4. hook matcher 靠 regex 巧合命中，不夠明確 ✅ 已修正
 
 `"matcher": "Edit|Write|Bash|Read|Grep|Glob"` 目前擋得到 `MultiEdit` 與 `NotebookEdit`
 （實測有擋），但那是因為這兩個名字**剛好包含子字串 `Edit`**。
@@ -478,7 +515,17 @@ for name, payload in PROBES:
     print(("擋下  " if run(payload) == 2 else "放行!!") + " | " + name)
 ```
 
-2026-09-10 的實測結果：**上述 17 個案例全部放行**。
+2026-09-10 修正前的實測結果：**上述 17 個案例全部放行**。
 對照組（`Read {"file_path": "tests/hidden/test_x.py"}` 這種相對路徑寫法）有正確擋下，
 `scripts/test-guards.py` 既有的 30 個案例也全部通過——
 問題不在既有測試寫錯，而在測試涵蓋的攻擊面不夠寬。
+
+**修正後（P0-1／P0-5 落地）再跑一次**：
+
+- P0-1 的 5 個案例：全部擋下 ✅（另加 `Grep` 用絕對路徑指 `path`，也擋下）
+- P0-5 的 3 種看不懂的輸入（非 JSON、空、`null`）：全部擋下 ✅
+- P0-2 / P0-3 / P0-4 的案例：**仍然放行**，屬預期範圍（尚未實作）
+- 反向對照（讀 `README.md`、讀已鎖定的公開測試、讀 repo 之外的路徑）：正確放行 ✅
+
+這批案例已經整批移進 `scripts/test-guards.py`（目前 42 案例）與
+`scripts/test-locks.py`（12 案例），改動機制後直接跑這兩支即可。
