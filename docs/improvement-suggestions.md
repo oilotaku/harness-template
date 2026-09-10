@@ -23,9 +23,9 @@
 | 其餘 P1-3 / P1-4 / P2 / P3 | ⬜ 未動 | 見下方各節 |
 
 已修正的項目在小節標題標上「✅ 已修正」，內文保留原本的問題描述當作紀錄。
-回歸測試：`python3 scripts/test-guards.py`（52 案例）、
+回歸測試：`python3 scripts/test-guards.py`（54 案例）、
 `python3 scripts/test-locks.py`（12 案例）、`python3 scripts/test-vault.py`（19 案例），
-共 83 案例，並由 CI 在三個平台 × 兩個 Python 版本上自動執行。
+共 85 案例，並由 CI 在三個平台 × 兩個 Python 版本上自動執行。
 
 ---
 
@@ -470,6 +470,28 @@ jobs:
 > 同一輪也補上兩個「設定與程式碼漂移」的測試案例（P2-4 的後續）：
 > matcher 是否涵蓋 guard 實際處理的每一種工具、hook 指令是否都用了
 > `$CLAUDE_PROJECT_DIR` 絕對路徑。
+>
+> **CI 開起來的第一次執行就抓到一個真 bug**，正好證明這一項的價值：
+> Linux 與 macOS 全綠，**兩個 Windows job 立刻紅**，錯誤是
+> `UnicodeEncodeError: 'charmap' codec can't encode characters`。
+> 原因是本模板所有腳本都印繁體中文，而 Python 在 Windows 上預設用系統 ANSI
+> 代碼頁（英文 cp1252、繁中 cp950）編 stdout——**每一支腳本一 print 就崩潰**。
+> 這個 bug 從第一天就存在，只是 README 與各腳本都寫著「Win/Linux/Mac 通用」，
+> 卻從來沒有真的在 Windows 上跑過。
+>
+> 其中最危險的是 `guard-hidden-tests.py`：它擋下動作時要先印理由再 exit 2，
+> 如果 print 先崩潰，exit code 會變成 1——而 Claude Code 只把 2 當成 blocking
+> error，1 是 non-blocking，**工具照樣執行**。換句話說在 Windows 上，
+> 「擋下」會悄悄變成「放行」。
+>
+> 修法：新增 `scripts/utf8_output.py`，所有入口腳本啟動時把 stdout/stderr
+> 切成 UTF-8；`guard-hidden-tests.py` 因為是 hook（多一個 import 就多一個
+> 失敗點），改成內嵌同樣的邏輯，並讓 `_block()` 在連理由都印不出來時退回
+> 純 ASCII 訊息——但無論如何都還是 exit 2。
+>
+> 對應測試：`scripts/test-guards.py` 用 `PYTHONIOENCODING=cp1252` 在任何平台
+> 重現這個情境，斷言 (1) guard 在舊代碼頁下擋人時仍然 exit 2、
+> (2) 所有入口腳本都不會因為印中文而崩潰。
 
 ### P3-4. `.claude/settings.json` 的 deny 規則說服力不足
 

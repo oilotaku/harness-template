@@ -24,6 +24,13 @@ verifier-reviewer 也無從知道它跑的公開測試還是不是檢驗者當�
 import hashlib
 import os
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import utf8_output  # noqa: E402
+
+utf8_output.enable()  # Windows 主控台預設用 ANSI 代碼頁，不先切 UTF-8 會印不出中文
 
 IGNORE_NAMES = {".gitkeep"}
 

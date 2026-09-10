@@ -23,6 +23,12 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import utf8_output  # noqa: E402
+
+utf8_output.enable()  # Windows 主控台預設用 ANSI 代碼頁，不先切 UTF-8 會印不出中文
+
 SCRIPTS_DIR = Path(__file__).resolve().parent
 GUARD_SCRIPT = SCRIPTS_DIR / "guard-hidden-tests.py"
 
@@ -636,6 +642,65 @@ def _(tmp: Path):
         assert "$CLAUDE_PROJECT_DIR" in command, (
             f"hook 指令用了相對路徑：{command}——工作目錄不是 repo 根時會靜默失效"
         )
+
+
+# ------------------------------------------ 舊代碼頁主控台（Windows）（P3-3）
+#
+# 這批案例是 CI 抓出來的：本模板所有腳本都印繁體中文，而 Python 在 Windows 上
+# 預設用系統 ANSI 代碼頁編 stdout，結果每一支腳本一 print 就丟 UnicodeEncodeError。
+# 用 PYTHONIOENCODING=cp1252 就能在任何平台重現，所以測試不需要真的跑在 Windows。
+
+
+def run_with_legacy_console(script: Path, cwd: Path, *args) -> subprocess.CompletedProcess:
+    env = {**os.environ, "PYTHONIOENCODING": "cp1252", "CLAUDE_PROJECT_DIR": str(cwd)}
+    env.pop("HARNESS_HIDDEN_DIR", None)
+    return subprocess.run(
+        [sys.executable, str(script), *args],
+        text=True,
+        errors="replace",  # 讀取子行程輸出時也要容錯，否則測試自己會炸
+        capture_output=True,
+        cwd=str(cwd),
+        env=env,
+    )
+
+
+@case("舊代碼頁主控台下，guard 擋下時仍必須 exit 2（不能因為印不出中文變成放行）")
+def _(tmp: Path):
+    # 這是最危險的情境：print 崩潰會讓 exit code 從 2 變成 1，
+    # 而 Claude Code 只把 2 當成 blocking error——「擋下」會悄悄變成「放行」。
+    result = subprocess.run(
+        [sys.executable, str(GUARD_SCRIPT)],
+        input=json.dumps({"tool_name": "Read", "tool_input": {"file_path": "tests/hidden/x.py"}}),
+        text=True,
+        errors="replace",
+        capture_output=True,
+        cwd=str(tmp),
+        env={**os.environ, "PYTHONIOENCODING": "cp1252", "CLAUDE_PROJECT_DIR": str(tmp)},
+    )
+    assert result.returncode == 2, (
+        f"exit={result.returncode}（在舊代碼頁主控台下失去攔截能力）stderr={result.stderr}"
+    )
+    assert "UnicodeEncodeError" not in result.stderr, result.stderr
+
+
+@case("舊代碼頁主控台下，所有入口腳本都不會因為印中文而崩潰")
+def _(tmp: Path):
+    checks = [
+        ("machine-profile.py", ()),
+        ("service-scan.py", ()),
+        ("env-guard.py", ()),
+        ("lock-tests.py", ()),
+        ("verify-locks.py", ()),
+        ("guard-selfcheck.py", ()),
+        ("seal-hidden-tests.py", ("--help",)),
+        ("run-hidden-tests.py", ("--help",)),
+    ]
+    broken = []
+    for name, args in checks:
+        result = run_with_legacy_console(SCRIPTS_DIR / name, tmp, *args)
+        if "UnicodeEncodeError" in result.stderr or "UnicodeEncodeError" in result.stdout:
+            broken.append(name)
+    assert not broken, f"這些腳本在舊代碼頁主控台下會崩潰：{broken}"
 
 
 def main() -> int:

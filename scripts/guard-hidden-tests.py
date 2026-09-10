@@ -81,6 +81,19 @@ import shlex
 import sys
 from pathlib import Path
 
+# Windows 主控台預設用系統 ANSI 代碼頁（英文 cp1252、繁中 cp950），印中文會丟
+# UnicodeEncodeError。這支腳本刻意**不** import scripts/utf8_output.py，而是內嵌
+# 同一套邏輯：它是 hook，多一個 import 就多一個失敗點，而這裡失敗的後果特別嚴重
+# ——print 崩潰會讓 exit code 從 2（真正擋下）變成 1（non-blocking error，
+# 工具照樣執行），也就是在 Windows 上「擋下」會悄悄變成「放行」。
+for _stream in (sys.stdout, sys.stderr):
+    _reconfigure = getattr(_stream, "reconfigure", None)
+    if _reconfigure is not None:
+        try:
+            _reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            pass
+
 HIDDEN_TESTS_PREFIX = "tests/hidden"
 HARNESS_DIR_PREFIX = ".harness"
 
@@ -492,7 +505,18 @@ def check_payload(payload) -> str:
 
 
 def _block(reason: str) -> None:
-    print(reason, file=sys.stderr)
+    try:
+        print(reason, file=sys.stderr)
+    except (UnicodeEncodeError, OSError):
+        # 連理由都印不出來，也絕對不能因此放行：exit code 2 才是真正的攔截，
+        # 訊息只是附帶說明。退回純 ASCII 讓使用者至少知道發生了什麼事。
+        try:
+            sys.stderr.write(
+                "BLOCKED by guard-hidden-tests.py "
+                "(reason could not be encoded for this console)\n"
+            )
+        except OSError:
+            pass
     # exit code 2 才會被 Claude Code 視為 blocking error 並真正擋下工具呼叫；
     # exit code 1 只是 non-blocking error，動作仍會繼續執行。
     sys.exit(2)
@@ -530,10 +554,8 @@ if __name__ == "__main__":
     except SystemExit:
         raise
     except BaseException as exc:  # noqa: BLE001 — 刻意攔截全部：防護腳本必須 fail-closed
-        print(
+        _block(
             f"拒絕：防護腳本發生未預期錯誤（{type(exc).__name__}: {exc}），為安全起見擋下本次操作。"
             "這代表防作弊機制目前不可信，請先修復 scripts/guard-hidden-tests.py"
-            "（可用 python3 scripts/test-guards.py 確認）再繼續。",
-            file=sys.stderr,
+            "（可用 python3 scripts/test-guards.py 確認）再繼續。"
         )
-        sys.exit(2)

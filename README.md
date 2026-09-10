@@ -64,13 +64,18 @@
 python3 scripts/test-guards.py && python3 scripts/test-locks.py && python3 scripts/test-vault.py
 ```
 
-這三組（共 83 個案例）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
+這三組（共 85 個案例）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
 六種組合上自動執行（見 `.github/workflows/ci.yml`）。這個 repo 特別需要 CI，
 因為機制退化是無聲的——guard 少擋一種路徑寫法、封存腳本少刪一個檔案，
-功能看起來都還正常，只有測試會發現。
+功能看起來都還正常，只有測試會發現。CI 一開就立刻抓到一個一直存在、
+但從沒被發現的 bug：所有腳本在 Windows 主控台上一印中文就崩潰（見下）。
 
 支援的 Python 版本：**3.9 以上**，且不需要任何第三方套件
 （`psutil` 是選用的，裝了會讓服務掃描更準確）。
+
+Windows 使用者不需要另外設定 `PYTHONUTF8`：所有腳本啟動時會自己把 stdout/stderr
+切成 UTF-8（見 `scripts/utf8_output.py`），否則系統 ANSI 代碼頁編不出繁體中文，
+腳本會直接崩潰。
 
 ## 設計依據
 

@@ -15,6 +15,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import utf8_output  # noqa: E402
+
+utf8_output.enable()  # Windows 主控台預設用 ANSI 代碼頁，不先切 UTF-8 會印不出中文
+
 SCRIPTS_DIR = Path(__file__).resolve().parent
 STEPS = [
     ("機器效能掃描", "machine-profile.py"),
