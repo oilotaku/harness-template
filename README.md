@@ -26,7 +26,11 @@
    `python3 scripts/env-guard.py --update` 把目前環境設為新的基準指紋。
 3. 在 Claude Code 中打開專案，讓 `Orchestrator`（見 `.claude/agents/orchestrator.md`）
    依 `docs/task-decomposition-guide.md` 拆解你的需求。
-4. 依照 `docs/implementer-verifier-workflow.md` 的順序執行：
+4. **非 Python 專案**：在專案根目錄建立 `harness.config.json`，指定你的測試目錄
+   與測試指令。不設定的話防作弊機制會找不到你的測試，等於完全沒有保護
+   （`guard-selfcheck.py` 會在 session 開始時警告你）。範例見
+   `docs/multi-language-support.md`。
+5. 依照 `docs/implementer-verifier-workflow.md` 的順序執行：
    **檢驗者先寫測試 → 實作者才開始寫程式 → 檢驗者驗收**。
 
 ## 目錄導覽
@@ -47,11 +51,12 @@
 | `scripts/seal-hidden-tests.py` | **實體隔離**：把 `tests/hidden/` 加密搬到 repo 之外，並產生一次性執行權杖 | verifier-test-writer 寫完隱藏測試後 |
 | `scripts/run-hidden-tests.py` | 隱藏測試的**唯一執行入口**，需要權杖才解得開 | verifier-reviewer 驗收時 |
 | `scripts/hidden_vault.py` | 上面兩支共用的封存庫邏輯（加密、manifest、路徑規則） | 被 import，不直接執行 |
+| `scripts/harness_config.py` | 讀 `harness.config.json`：這個專案的測試路徑慣例（非 Python 專案一定要設） | 被 import，不直接執行 |
 | `scripts/guard-hidden-tests.py` | **事前攔截**：PreToolUse hook，擋下對 `tests/hidden/`（暫存區）、封存庫路徑、`.harness/` 與已鎖定公開測試的存取 | 每次工具呼叫（由 `.claude/settings.json` 掛上） |
 | `scripts/lock-tests.py` | 把 `tests/public/` 的**路徑 + sha256** 寫進 `.harness/locked-tests.list` | verifier-test-writer 寫完公開測試後 |
 | `scripts/verify-locks.py` | **事後稽核**：重算雜湊比對，抓出「事前攔截被繞過」的竄改 | verifier-reviewer 驗收的第一步 |
 | `scripts/guard-selfcheck.py` | **自我檢查**：用已知該被擋的 payload 實跑一次，確認防護這次真的生效 | SessionStart hook |
-| `scripts/test-guards.py` / `test-locks.py` / `test-vault.py` / `test-env-guard.py` | 上述機制各自的回歸測試 | 改動機制之後 |
+| `scripts/test-guards.py` / `test-locks.py` / `test-vault.py` / `test-env-guard.py` / `test-config.py` | 上述機制各自的回歸測試 | 改動機制之後 |
 
 四層各擋不同的東西，缺一不可：
 
@@ -64,10 +69,11 @@
 
 ```bash
 python3 scripts/test-guards.py && python3 scripts/test-locks.py \
-  && python3 scripts/test-vault.py && python3 scripts/test-env-guard.py
+  && python3 scripts/test-vault.py && python3 scripts/test-env-guard.py \
+  && python3 scripts/test-config.py
 ```
 
-這四組（共 102 個案例）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
+這五組（共 126 個案例）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
 六種組合上自動執行（見 `.github/workflows/ci.yml`）。這個 repo 特別需要 CI，
 因為機制退化是無聲的——guard 少擋一種路徑寫法、封存腳本少刪一個檔案，
 功能看起來都還正常，只有測試會發現。CI 一開就立刻抓到一個一直存在、

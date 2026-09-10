@@ -21,12 +21,12 @@
 | P0-3 Bash 包裝繞過 | 🟡 降級 | `tests/hidden/`（暫存區）仍可能被繞過；但封存後那裡是空的，封存庫拿到的是密文 |
 | P3-3 沒有 CI | ✅ 已修正 | 新增 `.github/workflows/ci.yml`：3 平台 × 2 個 Python 版本跑全部回歸測試 |
 | P3-1 env-guard 在容器每次誤報 | ✅ 已修正 | 指紋改成「身分／能力」分開比對、新增 `--update`，並抽出 `machine_facts.py` 與 `env_fingerprint.py` |
-| 其餘 P1-3 / P1-4 / P2 / P3-2 / P3-4 / P3-5 | ⬜ 未動 | 見下方各節 |
+| P1-4 保護路徑寫死 | ✅ 已修正 | 新增 `harness.config.json` 與 `harness_config.py`；設定錯誤 fail-closed；selfcheck 會警告「有測試但沒被保護」 |
+| 其餘 P1-3 / P2 / P3-2 / P3-4 / P3-5 | ⬜ 未動 | 見下方各節 |
 
 已修正的項目在小節標題標上「✅ 已修正」，內文保留原本的問題描述當作紀錄。
-回歸測試：`python3 scripts/test-guards.py`（55 案例）、
-`python3 scripts/test-locks.py`（12 案例）、`python3 scripts/test-vault.py`（19 案例）、
-`python3 scripts/test-env-guard.py`（16 案例），共 102 案例，
+回歸測試：`test-guards.py`（55）、`test-locks.py`（12）、`test-vault.py`（19）、
+`test-env-guard.py`（16）、`test-config.py`（24），共 **126 案例**，
 並由 CI 在三個平台 × 兩個 Python 版本上自動執行。
 
 ---
@@ -292,7 +292,7 @@ verifier-reviewer 無從知道它跑的公開測試還是不是原本那份。
 **建議修法**：範例 README 明確標註「本目錄的 hidden 測試僅供閱讀示範，不受 hook 保護」；
 同時把 P1-4 的「受保護路徑可設定」做出來，讓 monorepo 也能正確保護。
 
-### P1-4. 受保護路徑寫死，與「不綁定語言」的宣稱衝突
+### P1-4. 受保護路徑寫死，與「不綁定語言」的宣稱衝突 ✅ 已修正
 
 `HIDDEN_TESTS_PREFIX = "tests/hidden"` 是硬編碼的。但 `docs/multi-language-support.md`
 說本模板支援 Go / Rust / TypeScript / Java——這些語言的測試慣例都不是 `tests/public`
@@ -312,6 +312,32 @@ verifier-reviewer 無從知道它跑的公開測試還是不是原本那份。
 
 `guard-hidden-tests.py`、`lock-tests.py`、runner 都讀同一份設定；
 找不到時退回目前預設值，並由 `init.py` 提示使用者依語言調整。
+
+> **實際落地**：設定檔叫 `harness.config.json`（放專案根目錄、**會進版控**，
+> 因為它描述的是這個專案的慣例，跟 `.harness/` 的當下狀態性質不同），
+> 欄位是 `public_test_paths` / `hidden_test_paths` / `hidden_test_command`，
+> 路徑支援 monorepo 用的 `*` 萬用字元。另外多做了三件草稿沒提到、但更關鍵的事：
+>
+> 1. **設定錯誤 fail-closed，不退回預設值**。欄位名打錯、路徑寫成字串、
+>    指到 repo 之外、把整個 repo 設成受保護路徑——全部擋下並說明原因。
+>    「靜靜退回預設值」等於讓一個 typo 就能關掉防護，那正是本項要修的問題本身。
+> 2. **偵測「有測試但沒被保護」**。`guard-selfcheck.py` 在設定的測試目錄一個都
+>    不存在時，會掃描專案裡常見的測試檔名慣例（`*_test.go`、`*.spec.ts`、
+>    `test_*.py`…），發現就明確警告「這些測試完全不受保護」。
+>    P1-4 真正的痛點是**沉默失效**，光是「可以設定」不夠，還要在沒設定時會叫。
+> 3. **修掉一個順帶抓到的真 bug**：`unittest discover` 不會遞迴進沒有
+>    `__init__.py` 的子目錄，遇到就會「Ran 0 tests」但 exit 0——而
+>    `verifier-reviewer` 會把 exit 0 讀成「隱藏測試全過」，等於一個什麼都沒驗到的
+>    實作直接通過驗收。runner 現在會偵測各家 runner 的零測試輸出並判定不通過，
+>    並印出解密的檔案數供對照。（Python 3.13 起 unittest 自己會回非 0，
+>    但 3.12 以前不會，所以這個兜底有必要。）
+>
+> 為了讓設定只有一份驗證邏輯，`guard-hidden-tests.py` 這次選擇 import
+> `harness_config` 而不是內嵌——但過程中發現 module 層的例外跑在頂層 try/except
+> **之外**，會變成 exit 1（放行）。這個 fail-open 是 `test-config.py` 的
+> fail-closed 案例當場抓出來的，已改成把啟動錯誤記下來、在 `main()` 開頭轉成 exit 2。
+>
+> 對應測試：`scripts/test-config.py`（24 案例）。
 
 ---
 

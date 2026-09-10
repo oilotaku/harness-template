@@ -81,6 +81,24 @@ import shlex
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+# 這裡刻意用 import（不像 utf8_output 是內嵌的）：設定檔的驗證邏輯只能有一份，
+# 兩份會漂移，而漂移正是本 repo 已經吃過兩次虧的那類 bug。
+#
+# 但 module 層的例外**跑在底下那個頂層 try/except 之外**，會直接變成 traceback
+# 加 exit 1——而 Claude Code 只把 exit 2 當成 blocking error，1 是 non-blocking，
+# 工具照樣執行。也就是說「import 或設定壞掉」會變成靜默放行，正是本腳本最該避免的
+# 失敗模式。所以這裡把錯誤接下來記著，等 main() 開頭再用 _block() 轉成 exit 2。
+# （這個洞是 scripts/test-config.py 的 fail-closed 案例抓出來的。）
+try:
+    import harness_config  # noqa: E402
+
+    _STARTUP_ERROR = None
+except BaseException as _exc:  # noqa: BLE001 — 任何 import 失敗都要 fail-closed
+    harness_config = None
+    _STARTUP_ERROR = _exc
+
 # Windows 主控台預設用系統 ANSI 代碼頁（英文 cp1252、繁中 cp950），印中文會丟
 # UnicodeEncodeError。這支腳本刻意**不** import scripts/utf8_output.py，而是內嵌
 # 同一套邏輯：它是 hook，多一個 import 就多一個失敗點，而這裡失敗的後果特別嚴重
@@ -94,7 +112,6 @@ for _stream in (sys.stdout, sys.stderr):
         except (OSError, ValueError):
             pass
 
-HIDDEN_TESTS_PREFIX = "tests/hidden"
 HARNESS_DIR_PREFIX = ".harness"
 
 
@@ -117,6 +134,16 @@ def _repo_root() -> Path:
 REPO_ROOT = _repo_root()
 LOCKED_LIST = REPO_ROOT / ".harness" / "locked-tests.list"
 HIDDEN_MANIFEST = REPO_ROOT / ".harness" / "hidden-manifest.json"
+
+# 受保護的隱藏測試暫存區。不再寫死 "tests/hidden"——見 scripts/harness_config.py 的
+# 模組說明（P1-4：寫死路徑會讓非 Python 專案的保護悄悄失效）。
+# 設定檔有問題時記下錯誤，由 main() 轉成 exit 2（fail-closed），不是靜靜退回預設值。
+HIDDEN_TEST_PATTERNS = ["tests/hidden"]
+if harness_config is not None:
+    try:
+        HIDDEN_TEST_PATTERNS = harness_config.load(REPO_ROOT)["hidden_test_paths"]
+    except BaseException as _exc:  # noqa: BLE001 — 設定壞掉一律 fail-closed
+        _STARTUP_ERROR = _exc
 
 
 def _vault_dirs() -> list:
@@ -282,10 +309,11 @@ def _load_locked() -> set:
 
 
 def _is_hidden_tests_path(rel) -> bool:
-    if rel is None:
+    if rel is None or harness_config is None:
+        # harness_config 載入失敗時 main() 已經無條件擋下，走不到這裡；
+        # 保守回傳 False 只是避免在那個路徑上再丟一次例外。
         return False
-    normalized = rel.rstrip("/")
-    return normalized == HIDDEN_TESTS_PREFIX or normalized.startswith(HIDDEN_TESTS_PREFIX + "/")
+    return harness_config.matches(rel, HIDDEN_TEST_PATTERNS)
 
 
 def _is_harness_path(rel) -> bool:
@@ -321,7 +349,10 @@ def _check_file_path(raw_path: str, locked: set, tool_name: str = None):
         # 已存在來分辨「建立」與「覆蓋」。
         if tool_name == "Write" and not (REPO_ROOT / target).exists():
             return None
-        return "拒絕：不可修改（或用 Write 覆蓋已存在的）tests/hidden/ 底下的檔案。"
+        return (
+            "拒絕：不可修改（或用 Write 覆蓋已存在的）隱藏測試暫存區底下的檔案"
+            f"（受保護路徑：{'、'.join(HIDDEN_TEST_PATTERNS)}）。"
+        )
 
     if _is_harness_path(target):
         return (
@@ -349,8 +380,9 @@ def _check_read_tool(tool_name: str, tool_input: dict):
             return VAULT_REASON
         if _is_hidden_tests_path(_to_repo_relative(value)):
             return (
-                "拒絕：實作者子智能體不可讀取或搜尋 tests/hidden/ 目錄"
-                "（隱藏驗收測試，黃金法則第 1 條——不能修改，也不能看到）。"
+                "拒絕：實作者子智能體不可讀取或搜尋隱藏測試暫存區"
+                f"（受保護路徑：{'、'.join(HIDDEN_TEST_PATTERNS)}）"
+                "——隱藏驗收測試，黃金法則第 1 條：不能修改，也不能看到。"
             )
     return None
 
@@ -441,7 +473,7 @@ def _check_bash_command(command: str, locked: set):
         for target in write_candidates:
             if _is_protected_write_target(_to_repo_relative(target, cwd), locked):
                 return (
-                    "拒絕：偵測到 Bash 指令對受保護路徑（tests/hidden/、.harness/ 或"
+                    "拒絕：偵測到 Bash 指令對受保護路徑（隱藏測試暫存區、.harness/ 或"
                     f"已鎖定的公開測試）執行了寫入類操作（`{verb}` 目標：「{target}」），"
                     "一律擋下。若為誤判，請改用不涉及這些路徑的方式完成，"
                     "或請 Orchestrator / verifier 協助處理。"
@@ -450,7 +482,7 @@ def _check_bash_command(command: str, locked: set):
         for target in read_candidates:
             if _is_hidden_tests_path(_to_repo_relative(target, cwd)):
                 return (
-                    "拒絕：偵測到 Bash 指令讀取/搜尋 tests/hidden/ 目錄"
+                    "拒絕：偵測到 Bash 指令讀取/搜尋隱藏測試暫存區"
                     f"（`{verb}` 目標：「{target}」），一律擋下（黃金法則第 1 條——"
                     "不能修改，也不能看到）。若為誤判，請改用不涉及這個路徑的方式完成，"
                     "或請 Orchestrator / verifier 協助處理。"
@@ -465,8 +497,13 @@ def _check_bash_command(command: str, locked: set):
                 )
 
         if verb in INLINE_INTERPRETER_VERBS and any(f in args for f in INLINE_FLAGS):
+            literal_prefixes = [
+                # 萬用字元之後的部分無法當字面文字比對，取前面固定的那段就好。
+                pattern.split("*")[0].split("?")[0].rstrip("/")
+                for pattern in HIDDEN_TEST_PATTERNS
+            ]
             if (
-                HIDDEN_TESTS_PREFIX in raw_segment
+                any(prefix and prefix in raw_segment for prefix in literal_prefixes)
                 or HARNESS_DIR_PREFIX + "/" in raw_segment
                 or any(locked_path in raw_segment for locked_path in locked)
             ):
@@ -523,6 +560,13 @@ def _block(reason: str) -> None:
 
 
 def main() -> None:
+    if _STARTUP_ERROR is not None:
+        _block(
+            f"拒絕：防護設定載入失敗（{type(_STARTUP_ERROR).__name__}: {_STARTUP_ERROR}）。"
+            "在修好之前一律擋下——設定壞掉時退回預設值等於讓一個 typo 就能關掉防護，"
+            f"請修正 {getattr(harness_config, 'CONFIG_FILENAME', 'harness.config.json')} 後再試。"
+        )
+
     raw = sys.stdin.read()
 
     try:

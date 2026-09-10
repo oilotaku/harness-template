@@ -15,6 +15,7 @@ session 的上下文，所以防護一旦失效，Orchestrator 與使用者第�
 
 本腳本一律以 exit code 0 結束——它的任務是「回報」，不是「阻止 session 開始」。
 """
+import fnmatch
 import json
 import os
 import subprocess
@@ -23,6 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import harness_config  # noqa: E402
 import utf8_output  # noqa: E402
 
 utf8_output.enable()  # Windows 主控台預設用 ANSI 代碼頁，不先切 UTF-8 會印不出中文
@@ -40,7 +42,18 @@ REPO_ROOT = _repo_root()
 GUARD = REPO_ROOT / "scripts" / "guard-hidden-tests.py"
 VERIFY_LOCKS = REPO_ROOT / "scripts" / "verify-locks.py"
 
-HIDDEN_PROBE_REL = "tests/hidden/__selfcheck_probe__.py"
+# 探測用的路徑要跟設定檔一致，否則在自訂測試目錄的專案上會探到一個
+# 「本來就不受保護」的位置，然後回報一個假的失敗。
+def _hidden_probe_rel() -> str:
+    try:
+        patterns = harness_config.load(REPO_ROOT)["hidden_test_paths"]
+    except harness_config.ConfigError:
+        patterns = harness_config.DEFAULT_HIDDEN_TEST_PATHS
+    base = patterns[0].split("*")[0].split("?")[0].strip("/") or "tests/hidden"
+    return f"{base}/__selfcheck_probe__.py"
+
+
+HIDDEN_PROBE_REL = _hidden_probe_rel()
 
 # (說明, payload 或 None 代表送出不合法的 stdin, 期望的 exit code)
 PROBES = [
@@ -90,6 +103,68 @@ def run_probe(payload) -> int:
     return result.returncode
 
 
+# 常見的測試檔案命名慣例。用來偵測「專案有測試，但都不在受保護路徑裡」——
+# 也就是 P1-4 要修的那個沉默失效：保護沒生效，而且沒有任何訊號。
+TEST_FILE_PATTERNS = (
+    "test_*.py", "*_test.py", "*_test.go", "*_test.rs",
+    "*.test.ts", "*.test.js", "*.test.tsx", "*.test.jsx",
+    "*.spec.ts", "*.spec.js", "*Test.java", "*Tests.cs",
+)
+SCAN_SKIP_DIRS = {
+    ".git", ".harness", "node_modules", "venv", ".venv", "__pycache__",
+    "target", "dist", "build", ".next", "vendor",
+    "templates",  # 本模板自己的範例目錄，不是使用者的測試
+}
+
+
+def check_config() -> None:
+    """回報受保護路徑，並在「專案有測試但都沒被保護」時明確警告。"""
+    try:
+        config = harness_config.load(REPO_ROOT)
+    except harness_config.ConfigError as exc:
+        print(f"⚠️ {harness_config.CONFIG_FILENAME} 有問題：{exc}")
+        print("在修好之前，guard hook 會 fail-closed 擋下所有工具呼叫。")
+        return
+
+    hidden = config["hidden_test_paths"]
+    public = config["public_test_paths"]
+    print(f"受保護路徑（來源：{config['_source']}）：")
+    print(f"  隱藏測試暫存區：{'、'.join(hidden)}")
+    print(f"  公開測試（鎖定對象）：{'、'.join(public)}")
+
+    configured_exists = bool(
+        harness_config.existing_dirs(hidden, REPO_ROOT)
+        or harness_config.existing_dirs(public, REPO_ROOT)
+    )
+    if configured_exists:
+        return
+
+    # 設定的測試目錄一個都不存在時，看看專案裡是不是其實有測試放在別的地方。
+    stray = []
+    for path in REPO_ROOT.rglob("*"):
+        if len(stray) >= 5:
+            break
+        if not path.is_file():
+            continue
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        if any(part in SCAN_SKIP_DIRS for part in path.relative_to(REPO_ROOT).parts[:-1]):
+            continue
+        if harness_config.matches(rel, hidden) or harness_config.matches(rel, public):
+            continue
+        if any(fnmatch.fnmatch(path.name, pattern) for pattern in TEST_FILE_PATTERNS):
+            stray.append(rel)
+
+    if stray:
+        print()
+        print("⚠️ 設定的測試目錄一個都不存在，但專案裡看起來有測試檔案：")
+        for rel in stray:
+            print(f"    {rel}")
+        print("這代表**這些測試完全不受保護**——鎖定與封存機制碰不到它們。")
+        print(f"請在 {harness_config.CONFIG_FILENAME} 指定你的專案慣例，例如：")
+        print('  {"public_test_paths": ["tests"], "hidden_test_paths": [".harness-hidden-staging"]}')
+        print("詳見 docs/multi-language-support.md。")
+
+
 def check_locks() -> None:
     if not VERIFY_LOCKS.exists():
         return
@@ -133,6 +208,7 @@ def main() -> int:
     else:
         print(f"防護正常：{len(PROBES)}/{len(PROBES)} 項檢查符合預期（隱藏測試讀寫皆被擋、一般檔案不受影響）。")
 
+    check_config()
     check_locks()
     print("===== 結束 =====")
     return 0

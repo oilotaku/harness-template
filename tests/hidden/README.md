@@ -37,3 +37,11 @@ python3 scripts/seal-hidden-tests.py --task-id <task_id>
 - 環境變數 `HARNESS_REPO_ROOT` 指向 repo 根目錄
 
 要找實作就用這三者其中之一，例如直接 `from src.foo import bar`。
+
+另外**請平鋪在這個目錄的第一層**：解密後 `unittest discover` 不會遞迴進沒有
+`__init__.py` 的子目錄，放巢狀會變成「一個測試都沒跑到」。
+
+## 這個目錄的位置可以改
+
+`tests/hidden` 只是預設值。非 Python 專案請在專案根目錄的 `harness.config.json`
+用 `hidden_test_paths` 指定自己的慣例（見 `docs/multi-language-support.md`）。

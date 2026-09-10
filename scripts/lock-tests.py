@@ -23,11 +23,12 @@ verifier-reviewer 也無從知道它跑的公開測試還是不是檢驗者當�
 """
 import hashlib
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import harness_config  # noqa: E402
 import utf8_output  # noqa: E402
 
 utf8_output.enable()  # Windows 主控台預設用 ANSI 代碼頁，不先切 UTF-8 會印不出中文
@@ -46,8 +47,22 @@ def _repo_root() -> Path:
 
 
 REPO_ROOT = _repo_root()
-PUBLIC_DIR = REPO_ROOT / "tests" / "public"
 LOCKED_LIST = REPO_ROOT / ".harness" / "locked-tests.list"
+
+
+def public_dirs():
+    """公開測試目錄。來自 harness.config.json 的 `public_test_paths`
+    （預設 ["tests/public"]），可以有多個，也支援 monorepo 的萬用字元。"""
+    config = harness_config.load(REPO_ROOT)
+    dirs = []
+    for pattern in config["public_test_paths"]:
+        if "*" in pattern or "?" in pattern:
+            dirs.extend(sorted(p for p in REPO_ROOT.glob(pattern) if p.is_dir()))
+        else:
+            candidate = REPO_ROOT / pattern
+            if candidate.is_dir():
+                dirs.append(candidate)
+    return dirs, config["public_test_paths"]
 
 
 def sha256_of(path: Path) -> str:
@@ -61,14 +76,19 @@ def sha256_of(path: Path) -> str:
 def main() -> None:
     LOCKED_LIST.parent.mkdir(parents=True, exist_ok=True)
 
-    if not PUBLIC_DIR.exists():
-        print(f"找不到 {PUBLIC_DIR.relative_to(REPO_ROOT)}/，沒有東西可鎖定，已將鎖定清單清空。")
+    dirs, patterns = public_dirs()
+
+    if not dirs:
+        print(f"找不到任何公開測試目錄（設定的路徑：{'、'.join(patterns)}），沒有東西可鎖定，")
+        print("已將鎖定清單清空。若你的專案用別的測試目錄慣例，請在 harness.config.json")
+        print("的 `public_test_paths` 指定（見 docs/multi-language-support.md）。")
         LOCKED_LIST.write_text("", encoding="utf-8")
         return
 
     entries = sorted(
         (p.relative_to(REPO_ROOT).as_posix(), sha256_of(p))
-        for p in PUBLIC_DIR.rglob("*")
+        for directory in dirs
+        for p in directory.rglob("*")
         if p.is_file() and p.name not in IGNORE_NAMES
     )
 
@@ -80,7 +100,7 @@ def main() -> None:
     for path, digest in entries:
         print(f"  - {path}  （sha256: {digest[:12]}…）")
     if not entries:
-        print("（tests/public/ 目前是空的，鎖定清單也已清空）")
+        print(f"（{'、'.join(str(d.relative_to(REPO_ROOT)) for d in dirs)} 目前是空的，鎖定清單也已清空）")
     else:
         print()
         print("驗收前請執行 python3 scripts/verify-locks.py 比對雜湊，")

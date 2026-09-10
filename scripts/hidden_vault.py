@@ -39,14 +39,19 @@ import hashlib
 import json
 import os
 import secrets
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import harness_config  # noqa: E402
 
 MANIFEST_VERSION = 1
 KEYSTREAM_INFO = b"harness-hidden-tests-v1"
 
-# {python} 會被換成執行 runner 的直譯器本身（sys.executable）。不寫死 python3 是因為
-# Windows 上常常只有 python.exe；而且用同一個直譯器，測試環境才跟 runner 一致。
-DEFAULT_TEST_COMMAND = "{python} -m unittest discover -s {dir} -p 'test_*.py' -v"
+# 預設測試指令現在由 harness_config 提供（可用 harness.config.json 覆寫，
+# 非 Python 專案一定要改）。這裡保留同名常數只是為了讓呼叫端讀起來一致。
+DEFAULT_TEST_COMMAND = harness_config.DEFAULT_HIDDEN_TEST_COMMAND
 
 
 # --------------------------------------------------------------------- 路徑
@@ -65,11 +70,26 @@ def manifest_path(root: Path = None) -> Path:
     return root / ".harness" / "hidden-manifest.json"
 
 
-def staging_dir(root: Path = None) -> Path:
-    """封存前的暫存區：verifier-test-writer 仍然把隱藏測試寫在這裡，
-    寫完執行 seal-hidden-tests.py 才搬出去。"""
+def staging_dirs(root: Path = None) -> list:
+    """封存前的暫存區（可能不只一個）：verifier-test-writer 把隱藏測試寫在這裡，
+    寫完執行 seal-hidden-tests.py 才搬出去。
+
+    路徑來自 harness.config.json 的 `hidden_test_paths`，預設 ["tests/hidden"]。
+    回傳的是「設定裡列到的目錄」，不論存不存在——呼叫端要自己處理不存在的情況。
+    """
     root = root or repo_root()
-    return root / "tests" / "hidden"
+    config = harness_config.load(root)
+    dirs = []
+    for pattern in config["hidden_test_paths"]:
+        if "*" in pattern or "?" in pattern:
+            dirs.extend(sorted(p for p in root.glob(pattern) if p.is_dir()))
+        else:
+            dirs.append(root / pattern)
+    return dirs
+
+
+def test_command(root: Path = None) -> str:
+    return harness_config.load(root or repo_root())["hidden_test_command"]
 
 
 def default_vault_dir(root: Path = None) -> Path:

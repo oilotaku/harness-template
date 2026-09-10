@@ -54,6 +54,26 @@ import utf8_output  # noqa: E402
 utf8_output.enable()  # Windows 主控台預設用 ANSI 代碼頁，不先切 UTF-8 會印不出中文
 
 
+# 測試指令「一個測試都沒跑到」卻回傳 0 的常見輸出特徵。
+# 這件事在這套機制裡特別危險：verifier-reviewer 會把 exit 0 讀成「隱藏測試全過」，
+# 於是一個什麼都沒驗到的實作就這樣通過驗收。實測觸發過的例子：
+# `unittest discover` 不會遞迴進沒有 __init__.py 的子目錄，檔案放巢狀就變成 Ran 0 tests。
+ZERO_TEST_SIGNATURES = (
+    "ran 0 tests",  # unittest
+    "no tests ran",  # pytest
+    "collected 0 items",  # pytest
+    "no tests found",  # 多數 runner
+    "no test files",  # go test
+    "no test files found",  # vitest
+    "0 passing",  # mocha
+)
+
+
+def looks_like_zero_tests(output: str) -> bool:
+    lowered = output.lower()
+    return any(signature in lowered for signature in ZERO_TEST_SIGNATURES)
+
+
 def list_tasks(manifest: dict) -> int:
     tasks = manifest.get("tasks", {})
     print("===== 已封存的隱藏測試 =====")
@@ -164,11 +184,35 @@ def main() -> int:
         print("（工作目錄為 repo 根目錄，解密後的暫存目錄在測試結束後會立刻刪除）")
         print("-" * 60)
 
-        result = subprocess.run(argv, cwd=str(root), env=env)
+        # 這裡要捕捉輸出而不是直接串到主控台，因為下面要檢查「有沒有真的跑到測試」；
+        # 捕捉後原樣印出來，verifier 看到的內容不變。
+        result = subprocess.run(
+            argv,
+            cwd=str(root),
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        output = (result.stdout or "") + (result.stderr or "")
+        print(output.rstrip())
 
         print("-" * 60)
+        if result.returncode == 0 and looks_like_zero_tests(output):
+            # exit 0 但一個測試都沒跑到——這是最危險的假通過，一定要當成失敗。
+            print("狀態：**不通過** —— 測試指令回傳成功，但輸出顯示一個測試都沒跑到。")
+            print(f"（本次解密了 {len(info.get('files', []))} 個隱藏測試檔案，卻沒有任何測試被執行）")
+            print("常見原因：")
+            print("  - 測試檔案放在暫存區的子目錄裡，而 `unittest discover` 不會遞迴進")
+            print("    沒有 __init__.py 的子目錄——把隱藏測試平鋪在暫存區第一層即可")
+            print("  - harness.config.json 的 hidden_test_command 檔名樣式跟實際檔名對不上")
+            print("這不是「通過」，請當成驗收未完成處理，修好之後重新封存再跑一次。")
+            return 1
         if result.returncode == 0:
             print("狀態：隱藏測試全部通過。")
+            print(f"（解密了 {len(info.get('files', []))} 個隱藏測試檔案；"
+                  "請順帶確認上面的測試數量看起來合理）")
             return 0
         print(f"狀態：隱藏測試未全部通過（測試指令 exit code = {result.returncode}）。")
         print("請把失敗的測試名稱與訊息寫進驗收報告；不要把隱藏測試的原始碼貼進報告。")

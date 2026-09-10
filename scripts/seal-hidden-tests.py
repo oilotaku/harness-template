@@ -46,10 +46,29 @@ utf8_output.enable()  # Windows 主控台預設用 ANSI 代碼頁，不先切 UT
 IGNORE_NAMES = {".gitkeep", "README.md"}
 
 
-def collect_files(staging: Path):
-    return sorted(
-        p for p in staging.rglob("*") if p.is_file() and p.name not in IGNORE_NAMES
-    )
+def collect_files(staging_dirs):
+    """從所有暫存區蒐集隱藏測試，回傳 [(來源路徑, 封存內的相對路徑)]。
+
+    封存內的相對路徑是「相對於它自己的暫存區」，因為解密後要平鋪回暫存目錄
+    給測試指令用。設定多個暫存區時可能撞名，撞名一定要明確報錯——
+    默默覆蓋等於有測試消失，而測試消失在這套機制裡是最不能接受的失敗。
+    """
+    collected = []
+    seen = {}
+    collisions = []
+    for staging in staging_dirs:
+        if not staging.is_dir():
+            continue
+        for source in sorted(staging.rglob("*")):
+            if not source.is_file() or source.name in IGNORE_NAMES:
+                continue
+            relative = source.relative_to(staging).as_posix()
+            if relative in seen:
+                collisions.append((relative, seen[relative], source))
+                continue
+            seen[relative] = source
+            collected.append((source, relative))
+    return collected, collisions
 
 
 def main() -> int:
@@ -57,28 +76,39 @@ def main() -> int:
     parser.add_argument("--task-id", required=True, help="這批隱藏測試對應的 task_id")
     parser.add_argument(
         "--test-command",
-        default=vault.DEFAULT_TEST_COMMAND,
+        default=None,
         help=(
             "執行這批隱藏測試的指令，{dir} 會被換成解密後的暫存目錄、"
-            f"{{repo}} 換成 repo 根目錄。預設：{vault.DEFAULT_TEST_COMMAND}"
+            "{repo} 換成 repo 根目錄、{python} 換成執行 runner 的直譯器。"
+            "沒指定時用 harness.config.json 的 hidden_test_command"
+            f"（目前預設：{vault.DEFAULT_TEST_COMMAND}）"
         ),
     )
     args = parser.parse_args()
 
     root = vault.repo_root()
-    staging = vault.staging_dir(root)
+    staging_dirs = vault.staging_dirs(root)
+    staging_labels = "、".join(
+        str(d.relative_to(root)) if d.is_relative_to(root) else str(d) for d in staging_dirs
+    ) or "（設定裡沒有任何隱藏測試路徑）"
 
     print("===== 封存隱藏測試 =====")
 
-    if not staging.exists():
-        print(f"找不到 {staging.relative_to(root)}/，沒有東西可封存。", file=sys.stderr)
+    files, collisions = collect_files(staging_dirs)
+
+    if collisions:
+        print("拒絕封存：不同暫存區出現同名的隱藏測試，封存後會互相覆蓋。", file=sys.stderr)
+        for relative, first, second in collisions:
+            print(f"  「{relative}」同時來自 {first} 與 {second}", file=sys.stderr)
+        print("請改名，或把 harness.config.json 的 hidden_test_paths 收斂成一個目錄。", file=sys.stderr)
         return 1
 
-    files = collect_files(staging)
     if not files:
         print(
-            f"{staging.relative_to(root)}/ 底下沒有隱藏測試檔案（.gitkeep / README.md 不算）。\n"
-            "請先寫好隱藏測試再執行本腳本。",
+            f"{staging_labels} 底下沒有隱藏測試檔案（.gitkeep / README.md 不算）。\n"
+            "請先寫好隱藏測試再執行本腳本。\n"
+            "若你的專案用別的測試目錄慣例，請在 harness.config.json 的 `hidden_test_paths`\n"
+            "指定（見 docs/multi-language-support.md）。",
             file=sys.stderr,
         )
         return 1
@@ -108,8 +138,7 @@ def main() -> int:
     # 順序很重要：先把密文全部寫完，再寫 manifest，最後才刪明文。
     # 反過來（邊寫邊刪）一旦中途失敗，會留下「明文已刪、但沒有 manifest
     # 所以永遠解不開」的狀態，隱藏測試等於直接消失。
-    for source in files:
-        relative = source.relative_to(staging).as_posix()
+    for source, relative in files:
         plaintext = source.read_bytes()
         target = task_dir / (relative + ".enc")
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -128,23 +157,27 @@ def main() -> int:
         "sealed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "vault_dir": str(vault_dir),
         "task_dir": str(task_dir),
-        "test_command": args.test_command,
+        "test_command": args.test_command or vault.test_command(root),
         "token_sha256": vault.token_fingerprint(token),
         "files": entries,
     }
     vault.save_manifest(manifest, root)
 
     # 密文與 manifest 都已落地，現在才刪掉工作目錄裡的明文。
-    for source in files:
+    for source, _relative in files:
         source.unlink()
 
-    # 把 staging 裡剩下的空目錄清掉，但保留 tests/hidden/ 本身與說明檔，
+    # 把暫存區裡剩下的空目錄清掉，但保留暫存區本身與說明檔，
     # 讓下一個 task 還有地方可以放。
-    for leftover in sorted(staging.rglob("*"), reverse=True):
-        if leftover.is_dir() and not any(leftover.iterdir()):
-            leftover.rmdir()
+    for staging in staging_dirs:
+        if not staging.is_dir():
+            continue
+        for leftover in sorted(staging.rglob("*"), reverse=True):
+            if leftover.is_dir() and not any(leftover.iterdir()):
+                leftover.rmdir()
 
     print(f"task_id：{args.task_id}")
+    print(f"來源暫存區：{staging_labels}")
     print(f"已封存 {len(entries)} 個隱藏測試檔案：")
     for entry in entries:
         print(f"  - {entry['path']}（{entry['bytes']} bytes）")

@@ -54,6 +54,9 @@ jobs:
       - name: 環境指紋回歸測試（該擋的要擋、不該吵的不能吵）
         run: python scripts/test-env-guard.py
 
+      - name: 專案測試路徑設定回歸測試（設定有效 + 設定錯誤不靜默）
+        run: python scripts/test-config.py
+
       - name: 在非 UTF-8 locale 下重跑（Linux 就能抓到編碼 bug，不用等 Windows）
         if: runner.os == 'Linux'
         env:
@@ -65,6 +68,7 @@ jobs:
           python -X utf8=0 scripts/test-locks.py
           python -X utf8=0 scripts/test-vault.py
           python -X utf8=0 scripts/test-env-guard.py
+          python -X utf8=0 scripts/test-config.py
 
       - name: 範例流程仍可重跑
         working-directory: templates/examples/demo-fizzbuzz

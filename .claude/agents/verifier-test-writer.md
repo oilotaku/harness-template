@@ -52,9 +52,14 @@ tools: Read, Write, Edit, Glob, Grep, Bash
 - `PYTHONPATH` 含 repo 根目錄
 - 環境變數 `HARNESS_REPO_ROOT` 指向 repo 根目錄
 
-要找實作就用這三者其中之一。非 Python 專案請在封存時用 `--test-command` 指定
-對應的測試指令（`{dir}` 會被換成解密後的暫存目錄、`{repo}` 換成 repo 根目錄），
-例如：`--test-command "npx vitest run {dir}"`。
+要找實作就用這三者其中之一。
+
+**隱藏測試要平鋪在暫存區的第一層**，不要放進子目錄——解密後 `unittest discover`
+不會遞迴進沒有 `__init__.py` 的子目錄，會變成「一個測試都沒跑到」卻看起來像通過。
+
+非 Python 專案：測試指令與測試路徑都寫在專案根目錄的 `harness.config.json`
+（見 `docs/multi-language-support.md`），單次任務要臨時覆寫則用
+`--test-command`，例如 `--test-command "npx vitest run --dir {dir}"`。
 
 ## 你完成後必須輸出
 
