@@ -27,7 +27,7 @@
 
 > 2026-09-10 之前這兩個路徑是寫死在程式碼裡的，所以上面整份「支援多語言」的
 > 說明其實只對 Python 成立，而且使用者不會收到任何錯誤訊息（見
-> `docs/improvement-suggestions.md` 的 P1-4）。現在改成讀專案根目錄的
+> `docs/history/improvement-suggestions.md` 的 P1-4）。現在改成讀專案根目錄的
 > `harness.config.json`，並且 `guard-selfcheck.py` 會在偵測到
 > 「專案有測試、但都不在受保護路徑裡」時明確警告。
 

@@ -26,12 +26,20 @@
 
 | 規則 | 不靠什麼 | 靠什麼 |
 |---|---|---|
-| 實作者看不到隱藏測試 | 提示詞叮嚀 | 加密封存到 repo 之外，解密需要一次性權杖 |
-| 公開測試不可被竄改 | 事前攔截有沒有成功 | 事後 sha256 稽核，被改過就查得出來 |
-| 連續失敗 ≥3 次要停損 | implementer 自我申報 | 由執行測試的一方寫入的客觀次數 |
+| 實作者看不到隱藏測試 | 提示詞叮嚀 | 加密封存到 repo 之外（每檔獨立金鑰），解密需要一次性權杖 |
+| 驗收結果不可被偽造 | 「`.harness/` 有 hook 擋著」 | runner 信任的每個 manifest 欄位都用權杖簽過章，改了就驗不過 |
+| 公開測試不可被竄改 | 事前攔截有沒有成功 | 事後 sha256 稽核；清單本身的 sha256 也在簽過章的 manifest 裡，整份刪掉也查得出來 |
+| 隱藏測試真的有鑑別力 | 「檢驗者會寫好」 | 封存後強制做基線執行：沒有實作時必須是紅的，結果簽進 manifest |
+| 連續失敗 ≥3 次要停損 | implementer 自我申報 | 由執行測試的一方寫入、逐筆簽章的客觀次數；筆數也簽進 manifest，砍掉紀錄查得出來 |
 | 檢驗者不動手改實作 | 提示詞叮嚀 | 它沒有 `Write` 工具；skill 政策也擋掉會產生程式碼的 skill |
 | 文件、設定、CI 保持一致 | 記得同步 | 漂移測試——少同步一處就直接紅 |
 | 環境變了要停下來確認 | 使用者自己注意 | 環境指紋比對，且刻意**不把容器的隨機主機名當成環境變更**（總是誤報的守門等於沒有守門） |
+
+**它擋什麼、不擋什麼**（誠實版本）：這套機制擋的是「順手看一眼」「習慣性搜整個 repo」
+「用工具的正常用法碰到」這類**非刻意**的洩題，並讓**刻意**的繞過留下痕跡（簽章不符、
+稽核不符、嘗試次數對不上）。它**不擋**一個「決心繞過、而且跟 verifier 共用同一個
+OS 使用者」的子智能體——權杖會經過 Claude Code 的 transcript，解密後的明文在測試執行
+期間短暫存在於暫存目錄。那需要獨立的使用者或容器，超出本模板範圍。
 
 ## 快速開始
 
@@ -113,12 +121,12 @@
 
 | 腳本 | 角色 | 什麼時候跑 |
 |---|---|---|
-| `scripts/seal-hidden-tests.py` | **實體隔離**：把隱藏測試暫存區加密搬到 repo 之外，並產生一次性執行權杖 | verifier-test-writer 寫完隱藏測試後 |
-| `scripts/run-hidden-tests.py` | 隱藏測試的**唯一執行入口**，需要權杖才解得開；順帶記錄驗收嘗試次數 | verifier-reviewer 驗收時 |
+| `scripts/seal-hidden-tests.py` | **實體隔離**：鎖定公開測試 → 把暫存區的隱藏測試逐檔加密（每檔獨立金鑰）搬到 repo 之外 → 用權杖簽章 manifest，並產生一次性執行權杖。已進 git 歷史的檔案拒絕封存 | verifier-test-writer 寫完測試後 |
+| `scripts/run-hidden-tests.py` | 隱藏測試的**唯一執行入口**：驗 manifest 簽章 → 比對鎖定清單 sha256 → 解密執行。`--baseline` 證明測試在沒有實作時是紅的；正式模式記錄簽過章的嘗試次數 | test-writer 封存後（`--baseline`）、verifier-reviewer 驗收時 |
 | `scripts/hidden_vault.py` | 上面兩支共用的封存庫邏輯（加密、manifest、路徑規則） | 被 import，不直接執行 |
 | `scripts/harness_config.py` | 讀 `harness.config.json`：這個專案的測試路徑慣例（非 Python 專案一定要設） | 被 import，不直接執行 |
 | `scripts/guard-hidden-tests.py` | **事前攔截**：PreToolUse hook，擋下對暫存區、封存庫、`.harness/`（`progress/` 除外）與已鎖定公開測試的存取 | 每次工具呼叫（由 `.claude/settings.json` 掛上） |
-| `scripts/lock-tests.py` | 把公開測試的**路徑 + sha256** 寫進 `.harness/locked-tests.list` | verifier-test-writer 寫完公開測試後 |
+| `scripts/lock-tests.py` | 把公開測試的**路徑 + sha256** 寫進 `.harness/locked-tests.list`；清單的 sha256 會被 seal 簽進 manifest | 由 `seal-hidden-tests.py` 自動呼叫；封存後修了公開測試要重新封存，不是只重跑這支 |
 | `scripts/verify-locks.py` | **事後稽核**：重算雜湊比對，抓出「事前攔截被繞過」的竄改 | verifier-reviewer 驗收的第一步 |
 | `scripts/guard-selfcheck.py` | **自我檢查**：用已知該被擋的 payload 實跑一次；另外掃出「看起來是隱藏測試、卻不在受保護路徑內」的目錄 | SessionStart hook |
 
@@ -171,7 +179,7 @@ python3 scripts/test-guards.py && python3 scripts/test-locks.py \
   && python3 scripts/test-attempts.py
 ```
 
-這九組（共 **253 個案例**）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
+這九組（共 **290 個案例**）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
 六種組合上自動執行，Linux 另外多跑一輪 `LC_ALL=C`（非 UTF-8 locale）
 （見 `.github/workflows/ci.yml`）。
 
@@ -216,9 +224,9 @@ session 各自重載 `CLAUDE.md` 與自己的定義檔。那是「獨立驗證�
 **SE-CoVe（獨立驗證鏈，Meta AI, ACL 2024）**概念，將「產生答案」與「驗證答案」
 拆成兩條完全獨立的鏈路。
 
-`docs/improvement-suggestions.md` 是這個模板的一份完整審視報告（18 項，全部結案），
+`docs/history/improvement-suggestions.md` 是這個模板的一份完整審視報告（18 項，全部結案），
 記錄了每一項的問題、修法、以及**實際落地時偏離原始草案的地方與理由**。
 它只給人看——那份文件比其他所有 `docs/` 加起來還大，不要放進任何子智能體的
 閱讀路徑（見 `docs/token-strategy.md` §1）。
-第二輪審視 `docs/improvement-suggestions-round2.md`（同樣只給人看）針對第一輪
+第二輪審視 `docs/history/improvement-suggestions-round2.md`（同樣只給人看）針對第一輪
 引入的新信任根——manifest、鎖定清單、keystream——做了實測，並列出尚未處理的項目。

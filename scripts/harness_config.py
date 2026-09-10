@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """harness_config.py — 專案自己的測試路徑慣例（harness.config.json）
 
-對應 docs/improvement-suggestions.md 的 P1-4。
+對應 docs/history/improvement-suggestions.md 的 P1-4。
 
 ## 問題
 

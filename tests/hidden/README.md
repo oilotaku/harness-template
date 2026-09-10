@@ -23,7 +23,7 @@ python3 scripts/seal-hidden-tests.py --task-id <task_id>
 2. 內容是密文 → 就算用腳本讀到檔案，拿到的也不是題目
 3. 解密要權杖，權杖只在派工 `verifier-reviewer` 時交出去 → 也不能拿來當 oracle
 
-細節見 `scripts/hidden_vault.py` 的模組說明與 `docs/improvement-suggestions.md` 的 P1-1。
+細節見 `scripts/hidden_vault.py` 的模組說明與 `docs/history/improvement-suggestions.md` 的 P1-1。
 
 ## 寫隱藏測試時的注意事項
 

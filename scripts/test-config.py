@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """test-config.py — harness.config.json（專案測試路徑慣例）的回歸測試
 
-對應 docs/improvement-suggestions.md 的 P1-4。
+對應 docs/history/improvement-suggestions.md 的 P1-4。
 
 這批測試守的是兩件事：
 

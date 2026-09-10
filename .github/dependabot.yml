@@ -1,0 +1,10 @@
+# 第二輪 P3-7：對一個「防作弊」repo 來說，CI 用到的 action 也是供應鏈威脅面之一。
+# 這裡讓 Dependabot 每週檢查 actions 的新版本並開 PR；版本 pin 到 commit SHA
+# 這件事刻意沒做——SHA 必須從 GitHub 實際查證，不能憑印象寫，留給 Dependabot 的
+# PR 帶進來（它的 PR 會附上 SHA）。
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

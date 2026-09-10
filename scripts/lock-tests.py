@@ -10,7 +10,7 @@ guard-hidden-tests.py 雖然會讀這份清單，但沒人寫入它，等於防�
 「覆寫」而非累加：只鎖定當下 tests/public/ 底下真實存在的檔案，避免舊任務
 殘留的路徑，誤鎖到之後合理被刪除/搬移的檔案。
 
-2026-09-10（對應 docs/improvement-suggestions.md 的 P1-2）：清單從「一行一個
+2026-09-10（對應 docs/history/improvement-suggestions.md 的 P1-2）：清單從「一行一個
 路徑」改成「一行 `<sha256>  <路徑>`」。原因是舊格式只記路徑，只要有任何一條
 繞過 hook 的路徑成功（實測存在多條），公開測試被改了之後沒有任何人會發現，
 verifier-reviewer 也無從知道它跑的公開測試還是不是檢驗者當初寫的那份。

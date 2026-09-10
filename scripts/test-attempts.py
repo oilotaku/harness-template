@@ -245,6 +245,102 @@ def _(tmp: Path):
 
 
 # --------------------------------------------------------------------------
+# 第二輪 P3-9：紀錄簽章
+# --------------------------------------------------------------------------
+
+KEY = b"k" * 32
+
+
+@case("P3-9：帶金鑰寫入的紀錄，帶同一把金鑰驗證為 ok")
+def _(tmp: Path):
+    attempts.record("T1", False, root=tmp, mac_key=KEY)
+    info = attempts.summary("T1", root=tmp, mac_key=KEY)
+    assert info["integrity"] == "ok", info
+    assert info["should_stop"] is False
+
+
+@case("P3-9：沒帶金鑰時 integrity 是 unchecked，跟「沒有紀錄」分開")
+def _(tmp: Path):
+    attempts.record("T1", False, root=tmp, mac_key=KEY)
+    info = attempts.summary("T1", root=tmp)
+    assert info["integrity"] == "unchecked" and info["total"] == 1, info
+
+
+@case("P3-9：把一筆失敗改成通過，簽章對不上，should_stop 變成未知")
+def _(tmp: Path):
+    for _ in range(3):
+        attempts.record("T1", False, root=tmp, mac_key=KEY)
+    path = tmp / ".harness" / attempts.RECORD_FILENAME
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["tasks"]["T1"][-1]["passed"] = True
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    info = attempts.summary("T1", root=tmp, mac_key=KEY)
+    assert info["integrity"] == "tampered", info
+    assert info["should_stop"] is None, "紀錄被動過還敢說「不必停損」"
+
+
+@case("P3-9：整筆刪掉最後幾次失敗，靠 manifest 的計數抓到")
+def _(tmp: Path):
+    for _ in range(3):
+        attempts.record("T1", False, root=tmp, mac_key=KEY)
+    path = tmp / ".harness" / attempts.RECORD_FILENAME
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["tasks"]["T1"] = data["tasks"]["T1"][:1]  # 砍掉後兩次失敗，剩下那筆簽章仍然有效
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    only_signatures = attempts.summary("T1", root=tmp, mac_key=KEY)
+    assert only_signatures["integrity"] == "ok", "逐筆簽章本來就抓不到整筆刪除，這是預期"
+    with_count = attempts.summary("T1", root=tmp, mac_key=KEY, expected_total=3)
+    assert with_count["integrity"] == "tampered", with_count
+    assert with_count["should_stop"] is None
+
+
+@case("P3-9：重新封存換了金鑰之後，舊紀錄算 partial 而不是 tampered，停損照常判斷")
+def _(tmp: Path):
+    # 這正是第一版實作踩到的坑：每次重新封存都換權杖，用新金鑰驗舊紀錄全部不符，
+    # 於是連續失敗三次的 task 被判成「紀錄被動過、次數不可信」，停損提醒消失。
+    old_key = b"a" * 32
+    for _ in range(2):
+        attempts.record("T1", False, root=tmp, mac_key=old_key)
+    attempts.record("T1", False, root=tmp, mac_key=KEY)
+
+    info = attempts.summary("T1", root=tmp, mac_key=KEY, expected_total=3)
+    assert info["integrity"] == "partial", info
+    assert info["should_stop"] is True, "舊金鑰的紀錄驗不了不該讓停損判斷消失"
+
+    flipped = json.loads((tmp / ".harness" / attempts.RECORD_FILENAME).read_text(encoding="utf-8"))
+    flipped["tasks"]["T1"][-1]["passed"] = True  # 改的是現在這把金鑰簽的那筆
+    (tmp / ".harness" / attempts.RECORD_FILENAME).write_text(json.dumps(flipped), encoding="utf-8")
+    assert attempts.summary("T1", root=tmp, mac_key=KEY)["integrity"] == "tampered"
+
+
+@case("P3-9：runner 寫的紀錄帶簽章，manifest 記下筆數，show-attempts --token 驗得過")
+def _(tmp: Path):
+    repo = make_repo(tmp, FAILING_TEST)
+    token = seal(repo, "T1")
+    run_script(RUN, repo, "--task-id", "T1", "--token", token)
+    entries = json.loads((repo / ".harness" / attempts.RECORD_FILENAME).read_text(encoding="utf-8"))["tasks"]["T1"]
+    assert entries and "signature" in entries[0], entries
+    manifest = json.loads((repo / ".harness" / "hidden-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["tasks"]["T1"]["attempts_recorded"] == 1, manifest["tasks"]["T1"]
+
+    payload = json.loads(run_script(SHOW, repo, "--task-id", "T1", "--token", token, "--json").stdout)
+    assert payload["tasks"][0]["integrity"] == "ok", payload
+
+
+@case("P3-9：把 runner 寫的紀錄整份砍掉，show-attempts --token 會說被動過")
+def _(tmp: Path):
+    repo = make_repo(tmp, FAILING_TEST)
+    token = seal(repo, "T1")
+    run_script(RUN, repo, "--task-id", "T1", "--token", token)
+    (repo / ".harness" / attempts.RECORD_FILENAME).unlink()
+    payload = json.loads(run_script(SHOW, repo, "--task-id", "T1", "--token", token, "--json").stdout)
+    assert payload["tasks"][0]["integrity"] == "tampered", payload
+    assert payload["tasks"][0]["should_stop"] is None
+
+
+# --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
 

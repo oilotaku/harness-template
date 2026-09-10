@@ -112,6 +112,7 @@ harness-template/
 │   ├── public/                   ← 公開測試（交給實作者，鎖定後不可修改）
 │   └── hidden/                   ← 隱藏測試的**暫存區**；封存後這裡是空的
 ├── docs/                         ← 方法論文件（拆解、模型指派、成本、根因分析、估時…）
+│   └── history/                  ← 審視報告，只給人看；**不要放進任何子智能體的閱讀路徑**
 ├── reports/                      ← 驗收報告落檔處；檢驗者寫不了檔案，由 Orchestrator 落檔
 └── templates/                    ← task-spec / 驗收報告 / 驗收標準對照表範本（含 examples/）
 ```

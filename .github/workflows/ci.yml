@@ -1,4 +1,4 @@
-# 對應 docs/improvement-suggestions.md 的 P3-3。
+# 對應 docs/history/improvement-suggestions.md 的 P3-3。
 #
 # 為什麼這個 repo 特別需要 CI：它的主要內容就是一套「防作弊機制」，而機制退化
 # 是無聲的——guard 少擋一種路徑寫法、封存腳本少刪一個檔案，功能看起來都還正常，
@@ -13,6 +13,11 @@ on:
 
 permissions:
   contents: read
+
+# 同一個 PR 連推兩次時取消前一次——不然會同時跑兩套九個 job（第二輪 P3-7）。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 defaults:
   run:
@@ -41,6 +46,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+
+      - name: 靜態檢查：所有腳本在這個 Python 版本編得過（抓只在 3.9 才出現的語法錯）
+        run: python -m compileall -q scripts
 
       - name: guard hook 回歸測試（含歷史繞過手法與 settings.json 漂移檢查）
         run: python scripts/test-guards.py

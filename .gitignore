@@ -1,6 +1,15 @@
 __pycache__/
 *.pyc
 
-# 每台機器/每次任務的本機狀態（環境指紋、鎖定的公開測試清單），
-# 不應該被提交進 repo——見 scripts/env-guard.py、scripts/lock-tests.py。
+# 每台機器/每次任務的本機狀態（環境指紋、鎖定的公開測試清單、manifest、
+# 嘗試次數、進度檢查點），不應該被提交進 repo——見 scripts/env-guard.py、
+# scripts/lock-tests.py、scripts/hidden_vault.py。
 .harness/
+
+# 隱藏測試的暫存區（第二輪 P1-7）：明文一旦進了 git 歷史，`git log -p` 就永遠
+# 讀得到，封存腳本刪掉工作目錄裡的檔案對歷史沒有作用。所以暫存區裡除了說明檔
+# 一律不進版控。自訂 hidden_test_paths 的專案要自己加對應規則——
+# guard-selfcheck.py 會對每個受保護路徑跑 git check-ignore，沒被忽略就警告。
+tests/hidden/*
+!tests/hidden/README.md
+!tests/hidden/.gitkeep

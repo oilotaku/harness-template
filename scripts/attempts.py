@@ -31,6 +31,8 @@ Orchestrator 讀它就有客觀依據。
   「讀不到紀錄」跟「沒有失敗過」是兩件事，混為一談等於讓停損規則
   在檔案壞掉時靜靜消失——這個 repo 已經為這類沉默失效付過好幾次代價。
 """
+import hashlib
+import hmac
 import json
 import os
 import time
@@ -85,8 +87,23 @@ def load(root=None) -> dict:
     return {"tasks": tasks, "available": True, "warnings": []}
 
 
-def record(task_id: str, passed: bool, note=None, root=None):
-    """記一次驗收嘗試。寫入失敗回 None——記錄是輔助資訊，不該讓驗收本身失敗。"""
+def _key_id(mac_key: bytes) -> str:
+    return hashlib.sha256(mac_key).hexdigest()[:16]
+
+
+def _sign(entry: dict, mac_key: bytes) -> str:
+    """每筆紀錄的 HMAC（第二輪 P3-9）。金鑰由權杖推導（hidden_vault.mac_key），
+    implementer 沒有權杖，所以清掉或改寫自己的失敗紀錄之後簽章對不上。"""
+    body = {k: v for k, v in entry.items() if k != "signature"}
+    payload = json.dumps(body, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    return hmac.new(mac_key, payload, "sha256").hexdigest()
+
+
+def record(task_id: str, passed: bool, note=None, root=None, mac_key=None):
+    """記一次驗收嘗試。寫入失敗回 None——記錄是輔助資訊，不該讓驗收本身失敗。
+
+    給了 `mac_key` 就在這筆紀錄上附簽章；沒給就不簽（例如本機除錯）。
+    """
     document = load(root)
     if not document["available"]:
         # 舊檔壞掉時不要在上面疊加，那會讓壞掉的內容永遠留著。
@@ -96,7 +113,13 @@ def record(task_id: str, passed: bool, note=None, root=None):
         tasks = dict(document["tasks"])
 
     entries = list(tasks.get(task_id) or [])
-    entries.append({"passed": bool(passed), "at": time.time(), "note": note})
+    entry = {"passed": bool(passed), "at": time.time(), "note": note}
+    if mac_key is not None:
+        # key_id 讓驗證端分得出「用別把金鑰簽的」與「沒簽／簽錯」：同一個 task
+        # 重新封存會換權杖（換金鑰），舊紀錄不是被動過，只是這把金鑰驗不了。
+        entry["key_id"] = _key_id(mac_key)
+        entry["signature"] = _sign(entry, mac_key)
+    entries.append(entry)
     tasks[task_id] = entries
 
     path = record_path(root)
@@ -111,25 +134,75 @@ def record(task_id: str, passed: bool, note=None, root=None):
     return path
 
 
-def summary(task_id: str, root=None, threshold: int = DEFAULT_THRESHOLD) -> dict:
+def summary(task_id: str, root=None, threshold: int = DEFAULT_THRESHOLD, mac_key=None, expected_total=None) -> dict:
     """某個 task 的嘗試統計，含「該不該停損」的判斷。
 
     `should_stop` 有三種值：
       True  —— 連續失敗次數已達門檻，Orchestrator 應該介入而不是再派一輪
       False —— 還沒到門檻
-      None  —— **未知**（紀錄檔壞掉）。不可以當成 False。
+      None  —— **未知**（紀錄檔壞掉，或給了金鑰但簽章對不上）。不可以當成 False。
+
+    `integrity`：
+      "unchecked" —— 沒給金鑰，無法驗證（跟「沒有紀錄」是兩件事）
+      "ok"        —— 每一筆簽章都對
+      "partial"   —— 這把金鑰能驗的都對，但有些是先前封存（另一把權杖）簽的，驗不了
+      "tampered"  —— 至少一筆缺簽章或簽章不符、或筆數比 manifest 記的少：紀錄被動過
+
+    重新封存同一個 task 會換權杖、換金鑰，所以舊紀錄用新金鑰驗不了——那不是竄改。
+    停損看的是**最後幾筆**連續失敗，而最後幾筆一定是現在這把金鑰簽的（只要新權杖
+    跑過一次），所以「partial」不影響 should_stop 的可信度；舊紀錄被改只會動到
+    歷史總數，動不到尾端。
     """
     if threshold < 1:
         raise ValueError(f"threshold 至少是 1，收到 {threshold}")
 
     document = load(root)
     entries = document["tasks"].get(task_id) or []
+    warnings = list(document["warnings"])
+
+    integrity = "unchecked"
+    if mac_key is not None:
+        current_key = _key_id(mac_key)
+        bad, foreign = [], []
+        for index, entry in enumerate(entries):
+            signature = entry.get("signature")
+            if not isinstance(signature, str):
+                bad.append(index)
+            elif entry.get("key_id") not in (None, current_key):
+                foreign.append(index)
+            elif not hmac.compare_digest(_sign(entry, mac_key), signature):
+                bad.append(index)
+        if bad:
+            integrity = "tampered"
+            warnings.append(
+                f"{len(bad)} 筆紀錄缺簽章或簽章不符（第 {', '.join(str(i + 1) for i in bad)} 筆）："
+                "attempts.json 在 runner 寫入之後被動過，次數不可信。"
+            )
+        elif foreign:
+            integrity = "partial"
+            warnings.append(
+                f"{len(foreign)} 筆紀錄是先前封存的權杖簽的，這把權杖驗不了"
+                f"（第 {', '.join(str(i + 1) for i in foreign)} 筆）；最近的紀錄已驗證。"
+            )
+        else:
+            integrity = "ok"
+
+    # 逐筆簽章抓不到「整筆刪掉」。runner 會把已記錄的筆數寫進簽過章的 manifest，
+    # 呼叫方帶過來比對：少了就是有人砍掉紀錄（最有動機砍的正是最後幾次失敗）。
+    if expected_total is not None and integrity != "tampered" and len(entries) != int(expected_total):
+        integrity = "tampered"
+        warnings.append(
+            f"manifest 記錄 runner 寫過 {expected_total} 筆，attempts.json 裡只有 {len(entries)} 筆："
+            "有紀錄被刪掉了，次數不可信。"
+        )
 
     consecutive = 0
     for entry in reversed(entries):
         if entry.get("passed"):
             break
         consecutive += 1
+
+    trustworthy = document["available"] and integrity != "tampered"
 
     return {
         "task_id": task_id,
@@ -138,7 +211,8 @@ def summary(task_id: str, root=None, threshold: int = DEFAULT_THRESHOLD) -> dict
         "consecutive_failures": consecutive,
         "last_passed": bool(entries[-1].get("passed")) if entries else None,
         "threshold": threshold,
-        "should_stop": (consecutive >= threshold) if document["available"] else None,
+        "should_stop": (consecutive >= threshold) if trustworthy else None,
         "available": document["available"],
-        "warnings": list(document["warnings"]),
+        "integrity": integrity,
+        "warnings": warnings,
     }

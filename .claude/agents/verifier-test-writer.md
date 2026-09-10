@@ -73,32 +73,42 @@ frontmatter 的 `thinking` 欄位**不會被 Claude Code 讀取**，它只是本
 ## 你完成後必須輸出
 
 1. 公開測試檔案（會被鎖定，implementer 不可修改）
-2. **已封存**的隱藏測試（執行過 `seal-hidden-tests.py`，工作目錄裡不留明文）
-3. **執行權杖**：封存腳本會印出一串只出現這一次的權杖。把它原封不動交回
+2. **已封存**的隱藏測試（執行過 `seal-hidden-tests.py`，工作目錄裡不留明文）。
+   這個指令會**先鎖定公開測試、再封存、再用權杖簽章 manifest**，一次做完。
+3. **基線執行結果**：封存後**立刻**跑
+   `python3 scripts/run-hidden-tests.py --task-id <task_id> --token <權杖> --baseline`，
+   證明這份隱藏測試在沒有實作時是**紅的**。這一跑不計入 implementer 的停損次數，
+   結果會簽進 manifest。全綠代表沒有鑑別力（一份全部 `assert True` 的測試也會
+   「全部通過」）——修正測試後重新封存。這也是你唯一能確認「隱藏測試至少跑得起來」
+   的機會：封存之後明文就沒了，語法錯誤到驗收時才發現只能憑記憶重寫。
+4. **執行權杖**：封存腳本會印出一串只出現這一次的權杖。做完基線執行後把它原封不動交回
    Orchestrator，**你自己不要留存**。權杖遺失沒有救援路徑（manifest 只存指紋），
    只能重寫一份隱藏測試再封存一次——這是刻意的，留後門等於留繞過方式。
-4. 一份「驗收標準對照表」：**用 `templates/acceptance-mapping-template.md` 的格式**，
+5. 一份「驗收標準對照表」：**用 `templates/acceptance-mapping-template.md` 的格式**，
    每條 task-spec 的驗收標準對應到哪些測試案例，
    確保沒有遺漏的驗收標準。**這份對照表不要放進 `tests/hidden/`**（會被一起封存
    加密，之後誰都讀不到）——直接在你的回覆/輸出裡交給 Orchestrator 轉交
    verifier-reviewer。對照表只寫「哪條驗收標準對應哪個測試名稱」，
    不要寫斷言內容與期望值，否則對照表本身就變成洩題管道。
 
-## 完成公開測試後，必須執行鎖定腳本
+## 公開測試的鎖定：封存時自動做，但順序要對
 
-寫完 `tests/public/` 底下的檔案後，**執行 `python3 scripts/lock-tests.py`**，
-把這些檔案的路徑與 sha256 雜湊寫入 `.harness/locked-tests.list`。這份清單是
-implementer 之後不能修改公開測試的來源，而且是兩道防線：
+`seal-hidden-tests.py` 會在封存前自動執行鎖定（等同 `lock-tests.py`），
+把公開測試的路徑與 sha256 寫入 `.harness/locked-tests.list`，**並把這份清單的
+sha256 寫進簽過章的 manifest**。所以公開測試一定要在封存**之前**寫完。這是三道防線：
 
 1. **事前**：`guard-hidden-tests.py` 這個 PreToolUse hook 讀清單裡的路徑，
    擋下對這些檔案的寫入。
-2. **事後**：`verifier-reviewer` 驗收的第一步會跑 `scripts/verify-locks.py`
+2. **事後**：`verifier-reviewer` 驗收時跑 `scripts/verify-locks.py`
    重算雜湊比對，就算事前攔截被繞過（或 hook 根本沒執行到），
    竄改仍然會被抓出來。
+3. **清單本身**：清單被整份刪掉或改寫時，`run-hidden-tests.py` 比對 manifest 裡的
+   sha256 會直接拒絕執行——第二輪實測，之前 implementer 先刪清單再改公開測試，
+   驗收流程對這件事的反應只是「註記一下」。
 
-只在文件裡寫「要鎖定」而沒有實際執行這支腳本，等於兩道防線都沒有。
-公開測試如果之後有修正，要重新執行一次 `lock-tests.py` 更新雜湊，
-否則 verify-locks 會把你自己的修正判定成竄改。
+公開測試如果在封存之後還有修正，**重新執行 `seal-hidden-tests.py`**（它會重新鎖定、
+重新封存、換一把權杖）。只跑 `lock-tests.py` 的話，清單的 sha256 會跟 manifest
+對不上，runner 會把你自己的修正判定成「清單被改寫」。
 
 ## 禁止事項
 

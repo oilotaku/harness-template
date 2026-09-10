@@ -18,22 +18,24 @@
         ▼
 2. verifier-test-writer 讀 task-spec
    → 產出 tests/public/*（會交給實作者）
-   → 產出 tests/hidden/*，然後執行 seal-hidden-tests.py 封存
-     （加密搬到 repo 之外，工作目錄不留明文，並拿到一次性「執行權杖」）
+   → 產出隱藏測試到暫存區（預設 tests/hidden/），然後執行 seal-hidden-tests.py：
+     一個指令做完「鎖定公開測試（路徑 + sha256 寫入 .harness/locked-tests.list）
+     → 逐檔加密搬到 repo 之外 → 用權杖簽章 manifest」，並拿到一次性「執行權杖」
+   → 立刻執行 run-hidden-tests.py --baseline：證明隱藏測試在沒有實作時是紅的
+     （結果寫進簽過章的 manifest，不計入停損次數）
    → 產出「驗收標準對照表」
    → 把權杖交回 Orchestrator（只有 verifier-reviewer 會拿到）
         │
-        ▼（執行 `python3 scripts/lock-tests.py`，鎖定 tests/public 並把
-            「路徑 + sha256」寫入 .harness/locked-tests.list——這一步是實際的
-            技術強制力來源，不是單純的文件約定）
+        ▼
 3. implementer-* 讀 task-spec + tests/public/*
    → 只能新增/修改功能程式碼，不能碰 tests/
    → 完成後產出「實作說明」+ 自我聲明「未修改任何測試檔案」
         │
         ▼
 4. verifier-reviewer 讀 task-spec + 實作者變更 + tests/public
-   → 先跑 verify-locks.py 稽核公開測試有沒有被竄改
-   → 用 run-hidden-tests.py + 權杖執行隱藏測試（讀不到原始碼，只拿得到結果）
+   → 先跑 guard-selfcheck.py --strict 確認防護還活著，再跑 verify-locks.py 稽核公開測試
+   → 用 run-hidden-tests.py + 權杖執行隱藏測試（讀不到原始碼，只拿得到結果）：
+     runner 先驗 manifest 簽章、再比對鎖定清單的 sha256，都過了才解密執行
    → 對照「驗收標準對照表」逐條確認
    → 檢查作弊模式清單（見 verifier-reviewer.md）
    → 產出 verification-report
@@ -54,17 +56,28 @@
 
    - Claude Code 的 Read/Edit/Write/Grep/Glob 本來就以專案目錄為界 → 碰不到；
      連「不指定 path 的全 repo 搜尋」也搜不到
-   - 內容是密文 → 就算 implementer 自己寫一支腳本去讀封存檔案，拿到的也不是題目
+   - 內容是密文，而且**每個檔案各自一把金鑰**（第二輪 P1-5 之前所有檔案共用一條
+     keystream，拿公開測試的檔頭當 crib 就能還原隱藏測試開頭）
    - 解密要權杖，權杖只交給 verifier-reviewer → 也不能拿來當「反覆查詢的 oracle」
+   - runner 信任的每個 manifest 欄位都用權杖簽過章（第二輪 P0-6 之前把 `test_command`
+     換成假腳本就能讓 verifier 拿到「全部通過」）
 
-   `guard-hidden-tests.py` 仍然保護 `tests/hidden/`（封存前的暫存區）與封存庫路徑，
+   `guard-hidden-tests.py` 仍然保護暫存區與封存庫路徑，
    但它的角色已經從「唯一防線」降級成「縱深防禦的其中一層」。
 3. **權限保證**：透過 `.claude/settings.json` 的 hook（`guard-hidden-tests.py`）
    在工具層級直接擋下對測試檔案的寫入與讀取，不只是靠「口頭約定」。此 hook 掛在
    `Edit|Write|Bash|Read|Grep|Glob`——只擋 Edit/Write 不夠，implementer 仍握有
-   Bash 工具，可以直接用 `rm`/`sed -i`/重導向、或切換工作目錄後用相對路徑等方式
-   繞過單純的路徑字串比對，因此 Bash 指令會先切成多個簡單指令、追蹤 `cd` 造成的
-   虛擬工作目錄後再逐一比對（細節與已知殘留限制見腳本內的模組說明）。
+   Bash 工具，因此 Bash 指令會先切成多個簡單指令、追蹤 `cd` 造成的虛擬工作目錄後
+   再逐一比對；對暫存區與封存庫是「指令裡出現路徑就擋、不分動詞」，對已鎖定的
+   公開測試則只擋明確的寫入動詞（`rm`/`sed -i`/`perl -pi`/`git checkout|restore|…`），
+   因為 implementer 有正當理由**讀**公開測試（細節與已知殘留限制見腳本內的模組說明）。
+
+   **這套機制擋的是什麼、不擋什麼**（誠實版本，第二輪 P1-8）：它擋的是「順手看一眼」
+   「習慣性搜整個 repo」「用工具的正常用法碰到」這類**非刻意**的洩題，並讓**刻意**的
+   繞過留下痕跡——簽章不符、稽核不符、嘗試次數對不上。它**不擋**一個「決心繞過、
+   而且跟 verifier 共用同一個 OS 使用者」的子智能體：權杖會經過 Claude Code 的
+   transcript（`~/.claude/projects/…jsonl`，同一個使用者讀得到），解密後的明文在
+   測試執行期間短暫存在於暫存目錄。那需要獨立的使用者或容器，超出本模板範圍。
 4. **獨立驗證鏈**：`verifier-reviewer` 與 `implementer-*` 是不同 session，
    不共用上下文，驗收時是「從零重新審視」而不是延續實作者的思路
    （對應 SE-CoVe 獨立驗證鏈的精神）。

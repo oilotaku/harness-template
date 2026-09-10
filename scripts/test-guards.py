@@ -435,7 +435,7 @@ def _(tmp: Path):
 
 # ------------------------------------------------- P0-1：路徑寫法正規化（2026-09-10）
 #
-# 以下這批案例對應 docs/improvement-suggestions.md 的 P0-1：第二版的
+# 以下這批案例對應 docs/history/improvement-suggestions.md 的 P0-1：第二版的
 # Edit/Write/Read/Grep/Glob 分支只做字串前綴比對，因此絕對路徑、`./`、`//`、`..`
 # 這些寫法全部擋不到。其中「絕對路徑」尤其嚴重——Read 工具的 file_path 規定
 # 就是要絕對路徑，等於讀取保護在正常用法下完全失效。
@@ -791,7 +791,7 @@ def _(tmp: Path):
     assert result.returncode == 0, f"exit={result.returncode} stderr={result.stderr}"
 
 
-def selfcheck_in(repo: Path) -> subprocess.CompletedProcess:
+def selfcheck_in(repo: Path, *args) -> subprocess.CompletedProcess:
     """在一個假 repo 裡跑 guard-selfcheck.py。
 
     它會先確認 REPO_ROOT/scripts/guard-hidden-tests.py 存在（不存在就直接
@@ -803,10 +803,156 @@ def selfcheck_in(repo: Path) -> subprocess.CompletedProcess:
     if not target.exists():
         shutil.copytree(SCRIPTS_DIR, target)
     return subprocess.run(
-        [sys.executable, str(target / "guard-selfcheck.py")],
+        [sys.executable, str(target / "guard-selfcheck.py"), *args],
         text=True, encoding="utf-8", errors="replace", capture_output=True,
         cwd=str(repo), env={**os.environ, "CLAUDE_PROJECT_DIR": str(repo)},
     )
+
+
+# ------------------------------------------------ 第二輪 P2-6：已鎖定公開測試的事前層
+# 這些之前全部放行（實測）。事後稽核 verify-locks.py 抓得到，所以是 P2 不是 P0；
+# 但既然第一輪把 P0-3 標成「全部修正」，事前層就該把明確會改寫工作目錄的動詞補齊。
+# 這仍是列舉式的，主防線是事後稽核——文件也這樣寫。
+
+def _locked_repo(tmp: Path) -> None:
+    touch(tmp, "tests/public/test_x.py")
+    lock_with_hash(tmp, "tests/public/test_x.py")
+
+
+@case("P2-6：git checkout <舊版> -- <已鎖定檔> 應被擋")
+def _(tmp: Path):
+    _locked_repo(tmp)
+    result = run_guard(
+        tmp, {"tool_name": "Bash", "tool_input": {"command": "git checkout HEAD~1 -- tests/public/test_x.py"}}
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P2-6：git restore --source=<舊版> <已鎖定檔> 應被擋")
+def _(tmp: Path):
+    _locked_repo(tmp)
+    result = run_guard(
+        tmp,
+        {"tool_name": "Bash", "tool_input": {"command": "git restore --source=HEAD~1 tests/public/test_x.py"}},
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P2-6：有已鎖定的公開測試時，git apply / git am 一律擋（目標寫在 patch 裡看不到）")
+def _(tmp: Path):
+    _locked_repo(tmp)
+    for command in ("git apply fix.patch", "git am 0001-x.patch"):
+        result = run_guard(tmp, {"tool_name": "Bash", "tool_input": {"command": command}})
+        assert result.returncode == 2, f"{command} → exit={result.returncode}"
+
+
+@case("P2-6：沒有任何鎖定清單時 git apply 照常放行（沒有東西需要保護）")
+def _(tmp: Path):
+    result = run_guard(tmp, {"tool_name": "Bash", "tool_input": {"command": "git apply fix.patch"}})
+    assert result.returncode == 0, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P2-6：perl -pi -e / ruby -pi -e / sed -i.bak 對已鎖定檔應被擋")
+def _(tmp: Path):
+    _locked_repo(tmp)
+    for command in (
+        "perl -pi -e 's/assertEqual/assertTrue/' tests/public/test_x.py",
+        "ruby -pi -e 'gsub(/a/, \"b\")' tests/public/test_x.py",
+        "sed -i.bak 's/a/b/' tests/public/test_x.py",
+        "perl -i -pe 's/a/b/' tests/public/test_x.py",
+    ):
+        result = run_guard(tmp, {"tool_name": "Bash", "tool_input": {"command": command}})
+        assert result.returncode == 2, f"{command} → exit={result.returncode}"
+
+
+@case("P2-6 不可誤傷：讀取已鎖定檔、跑公開測試、不帶路徑的 git 指令仍然放行")
+def _(tmp: Path):
+    # 注意 `perl -e '…' <已鎖定檔>` 不在這裡：直譯器一行指令只要提到受保護路徑就會被
+    # 既有規則保守擋下（無法解析腳本實際做了什麼），那是刻意的，不算誤傷。
+    _locked_repo(tmp)
+    for command in (
+        "cat tests/public/test_x.py",
+        "python3 -m pytest tests/public",
+        "git checkout -b feature",
+    ):
+        result = run_guard(tmp, {"tool_name": "Bash", "tool_input": {"command": command}})
+        assert result.returncode == 0, f"{command} → exit={result.returncode} {result.stderr}"
+
+
+# ------------------------------------------------ 第二輪 P3-6：selfcheck --strict
+
+
+@case("P3-6：guard-selfcheck --strict 在防護正常時回 0")
+def _(tmp: Path):
+    (tmp / "tests" / "hidden").mkdir(parents=True)
+    result = selfcheck_in(tmp, "--strict")
+    assert result.returncode == 0, result.stdout
+
+
+@case("P3-6：guard-selfcheck --strict 在 guard 腳本不見時回 1（不加 --strict 仍回 0）")
+def _(tmp: Path):
+    import shutil
+
+    shutil.copytree(SCRIPTS_DIR, tmp / "scripts")
+    (tmp / "scripts" / "guard-hidden-tests.py").unlink()
+    assert selfcheck_in(tmp, "--strict").returncode == 1
+    assert selfcheck_in(tmp).returncode == 0, "SessionStart 模式不該阻止 session 開始"
+
+
+@case("P3-6：guard-selfcheck --strict 在設定檔壞掉時回 1")
+def _(tmp: Path):
+    (tmp / "harness.config.json").write_text('{"hidden_test_paths": "not-a-list"}', encoding="utf-8")
+    assert selfcheck_in(tmp, "--strict").returncode == 1
+
+
+# ------------------------------------------------ 第二輪 P1-7：暫存區要被 .gitignore 排除
+
+
+def _git_init(repo: Path) -> bool:
+    import shutil
+
+    if shutil.which("git") is None:
+        return False
+    subprocess.run(["git", "init", "-q"], cwd=str(repo), capture_output=True)
+    return True
+
+
+@case("P1-7：git repo 裡暫存區沒被 .gitignore 排除時，selfcheck 會警告")
+def _(tmp: Path):
+    if not _git_init(tmp):
+        return
+    (tmp / "tests" / "hidden").mkdir(parents=True)
+    result = selfcheck_in(tmp)
+    assert "沒有被 .gitignore 排除" in result.stdout, result.stdout
+
+
+@case("P1-7：暫存區有 .gitignore 規則時不警告")
+def _(tmp: Path):
+    if not _git_init(tmp):
+        return
+    (tmp / "tests" / "hidden").mkdir(parents=True)
+    (tmp / ".gitignore").write_text("tests/hidden/*\n!tests/hidden/README.md\n", encoding="utf-8")
+    result = selfcheck_in(tmp)
+    assert "沒有被 .gitignore 排除" not in result.stdout, result.stdout
+
+
+@case("P1-7：本 repo 的 .gitignore 確實排除了預設暫存區")
+def _(tmp: Path):
+    text = (SCRIPTS_DIR.parent / ".gitignore").read_text(encoding="utf-8")
+    assert "tests/hidden/*" in text, ".gitignore 少了暫存區的排除規則"
+
+
+# ------------------------------------------------ 第二輪 P2-8：斜線指令不得重抄步驟
+
+
+@case("P2-8：/task-plan 指令檔指向 orchestrator.md，且不再自己抄一份編號步驟")
+def _(tmp: Path):
+    import re
+
+    text = (SCRIPTS_DIR.parent / ".claude" / "commands" / "task-plan.md").read_text(encoding="utf-8")
+    assert "orchestrator.md" in text, "指令檔必須指向 agent 定義檔，清單只能有一份"
+    numbered = [line for line in text.splitlines() if re.match(r"^\s*\d+\.\s", line)]
+    assert not numbered, f"指令檔又抄了一份步驟清單，會跟 orchestrator.md 漂移：{numbered}"
 
 
 @case("selfcheck 會抓出不在受保護路徑內的隱藏測試目錄（P1-3）")
