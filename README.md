@@ -35,6 +35,11 @@
 
 ## 快速開始
 
+> **完全從零開始**（還沒裝 Python / Claude Code、或要套用到既有專案）請看
+> **[`docs/getting-started.md`](docs/getting-started.md)**——那份文件每一步都附
+> 「怎麼確認這一步成功了」，因為這個模板最大的風險是**看起來裝好了、
+> 但保護其實沒生效**。下面這段假設你已經有可用的環境。
+
 1. `git clone` 這個 repo（或把 `harness-template/` 內容複製到你的專案根目錄）。
 
 2. 執行初始化（機器效能掃描 → 既有服務掃描 → 環境指紋建立/比對）：
@@ -86,7 +91,7 @@
 | `.claude/agents/` | 子智能體定義（實作者 3 個、檢驗者 3 個） |
 | `.claude/commands/` | `/task-plan` `/task-dispatch` `/machine-check` 斜線指令（用法見下） |
 | `scripts/` | 掃描、防作弊機制本體、決策輔助工具（見下面兩張表） |
-| `docs/` | 任務拆解、模型/思考分配、實作/檢驗分離、多語言支援、記憶管理、token 成本策略、根因分析與修正流程、執行時間預測、skill 安裝決策 |
+| `docs/` | **從零開始套用**、任務拆解、模型/思考分配、實作/檢驗分離、多語言支援、記憶管理、token 成本策略、根因分析與修正流程、執行時間預測、skill 安裝決策 |
 | `templates/` | task-spec、驗收報告、驗收標準對照表範本（含 `examples/` 的完整範例） |
 | `reports/` | 驗收報告落檔處（檢驗者沒有 `Write` 工具，由 Orchestrator 落檔） |
 | `harness.config.json` | （選用）這個專案的測試路徑慣例；非 Python 專案要設 |
