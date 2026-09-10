@@ -23,9 +23,9 @@
 | 其餘 P1-3 / P1-4 / P2 / P3 | ⬜ 未動 | 見下方各節 |
 
 已修正的項目在小節標題標上「✅ 已修正」，內文保留原本的問題描述當作紀錄。
-回歸測試：`python3 scripts/test-guards.py`（54 案例）、
+回歸測試：`python3 scripts/test-guards.py`（55 案例）、
 `python3 scripts/test-locks.py`（12 案例）、`python3 scripts/test-vault.py`（19 案例），
-共 85 案例，並由 CI 在三個平台 × 兩個 Python 版本上自動執行。
+共 86 案例，並由 CI 在三個平台 × 兩個 Python 版本上自動執行。
 
 ---
 

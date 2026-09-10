@@ -53,7 +53,7 @@ def run_guard(cwd: Path, payload, raw_stdin: str = None, extra_env=None) -> subp
     return subprocess.run(
         [sys.executable, str(GUARD_SCRIPT)],
         input=raw_stdin if raw_stdin is not None else json.dumps(payload),
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         capture_output=True,
         cwd=cwd,
         env=env,
@@ -88,7 +88,9 @@ def write_manifest(tmp: Path, task_dir: Path) -> None:
 def lock(tmp: Path, *paths: str) -> None:
     """寫入舊格式（純路徑）鎖定清單，確保向後相容仍然有效。"""
     (tmp / ".harness").mkdir(exist_ok=True)
-    (tmp / ".harness" / "locked-tests.list").write_text("\n".join(paths) + "\n")
+    (tmp / ".harness" / "locked-tests.list").write_text(
+        "\n".join(paths) + "\n", encoding="utf-8"
+    )
 
 
 def lock_with_hash(tmp: Path, *paths: str) -> None:
@@ -103,7 +105,9 @@ def lock_with_hash(tmp: Path, *paths: str) -> None:
             else "0" * 64
         )
         lines.append(f"{digest}  {path}")
-    (tmp / ".harness" / "locked-tests.list").write_text("\n".join(lines) + "\n")
+    (tmp / ".harness" / "locked-tests.list").write_text(
+        "\n".join(lines) + "\n", encoding="utf-8"
+    )
 
 
 def touch(tmp: Path, path: str, content: str = "assert True\n") -> Path:
@@ -136,7 +140,7 @@ def _(tmp: Path):
 def _(tmp: Path):
     hidden_dir = tmp / "tests" / "hidden"
     hidden_dir.mkdir(parents=True)
-    (hidden_dir / "test_existing.py").write_text("# 既有隱藏測試\n")
+    (hidden_dir / "test_existing.py").write_text("# 既有隱藏測試\n", encoding="utf-8")
     result = run_guard(
         tmp,
         {"tool_name": "Write", "tool_input": {"file_path": "tests/hidden/test_existing.py"}},
@@ -148,7 +152,7 @@ def _(tmp: Path):
 def _(tmp: Path):
     hidden_dir = tmp / "tests" / "hidden"
     hidden_dir.mkdir(parents=True)
-    (hidden_dir / "test_existing.py").write_text("# 既有隱藏測試\n")
+    (hidden_dir / "test_existing.py").write_text("# 既有隱藏測試\n", encoding="utf-8")
     result = run_guard(
         tmp, {"tool_name": "Edit", "tool_input": {"file_path": "tests/hidden/test_existing.py"}}
     )
@@ -656,8 +660,7 @@ def run_with_legacy_console(script: Path, cwd: Path, *args) -> subprocess.Comple
     env.pop("HARNESS_HIDDEN_DIR", None)
     return subprocess.run(
         [sys.executable, str(script), *args],
-        text=True,
-        errors="replace",  # 讀取子行程輸出時也要容錯，否則測試自己會炸
+        text=True, encoding="utf-8", errors="replace",
         capture_output=True,
         cwd=str(cwd),
         env=env,
@@ -671,8 +674,7 @@ def _(tmp: Path):
     result = subprocess.run(
         [sys.executable, str(GUARD_SCRIPT)],
         input=json.dumps({"tool_name": "Read", "tool_input": {"file_path": "tests/hidden/x.py"}}),
-        text=True,
-        errors="replace",
+        text=True, encoding="utf-8", errors="replace",
         capture_output=True,
         cwd=str(tmp),
         env={**os.environ, "PYTHONIOENCODING": "cp1252", "CLAUDE_PROJECT_DIR": str(tmp)},
@@ -701,6 +703,58 @@ def _(tmp: Path):
         if "UnicodeEncodeError" in result.stderr or "UnicodeEncodeError" in result.stdout:
             broken.append(name)
     assert not broken, f"這些腳本在舊代碼頁主控台下會崩潰：{broken}"
+
+
+@case("所有腳本都明確指定編碼，不依賴系統預設（靜態檢查）")
+def _(tmp: Path):
+    # 這類 bug 在這個 repo 已經咬了兩次（主控台輸出、檔案讀寫），而且都只在
+    # 非 UTF-8 環境才會發作，靠人工 review 很難每次都抓到。改用 AST 靜態檢查：
+    #   - read_text / write_text 必須帶 encoding
+    #   - open() 的文字模式必須帶 encoding
+    #   - subprocess 的 text=True 必須帶 encoding（否則用系統預設解子行程輸出）
+    import ast
+
+    problems = []
+    for script in sorted(SCRIPTS_DIR.glob("*.py")):
+        tree = ast.parse(script.read_text(encoding="utf-8"), filename=str(script))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            kwargs = {kw.arg for kw in node.keywords}
+            name = (
+                node.func.attr
+                if isinstance(node.func, ast.Attribute)
+                else getattr(node.func, "id", "")
+            )
+
+            if name in ("read_text", "write_text") and "encoding" not in kwargs:
+                problems.append(f"{script.name}:{node.lineno} {name}() 沒有指定 encoding")
+
+            if name == "open" and "encoding" not in kwargs:
+                # 二進位模式不需要 encoding。注意 mode 的位置不一樣：
+                # 內建 open(file, mode) 在 args[1]，Path.open(mode) 在 args[0]。
+                mode_index = 0 if isinstance(node.func, ast.Attribute) else 1
+                mode = ""
+                if len(node.args) > mode_index and isinstance(node.args[mode_index], ast.Constant):
+                    mode = str(node.args[mode_index].value)
+                for kw in node.keywords:
+                    if kw.arg == "mode" and isinstance(kw.value, ast.Constant):
+                        mode = str(kw.value.value)
+                if "b" not in mode:
+                    problems.append(f"{script.name}:{node.lineno} open() 沒有指定 encoding")
+
+            if name in ("run", "check_output", "Popen") and "encoding" not in kwargs:
+                for kw in node.keywords:
+                    if kw.arg in ("text", "universal_newlines") and getattr(
+                        kw.value, "value", False
+                    ) is True:
+                        problems.append(
+                            f"{script.name}:{node.lineno} subprocess 用了 text=True 卻沒指定 encoding"
+                        )
+
+    assert not problems, "以下位置依賴系統預設編碼，在非 UTF-8 環境會炸：\n  " + "\n  ".join(
+        problems
+    )
 
 
 def main() -> int:

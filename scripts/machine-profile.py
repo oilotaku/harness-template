@@ -28,7 +28,7 @@ def get_memory_mb():
 
     if system == "Linux":
         try:
-            with open("/proc/meminfo") as f:
+            with open("/proc/meminfo", encoding="utf-8") as f:
                 for line in f:
                     if line.startswith("MemTotal:"):
                         kb = int(line.split()[1])
@@ -37,7 +37,7 @@ def get_memory_mb():
             return None
     elif system == "Darwin":
         try:
-            out = subprocess.check_output(["sysctl", "-n", "hw.memsize"], text=True)
+            out = subprocess.check_output(["sysctl", "-n", "hw.memsize"], text=True, encoding="utf-8", errors="replace")
             return int(out.strip()) // (1024 * 1024)
         except Exception:
             return None
@@ -76,7 +76,7 @@ def get_gpu_info():
         try:
             out = subprocess.check_output(
                 [nvidia_smi, "--query-gpu=name,memory.total", "--format=csv,noheader"],
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
             )
             if out.strip():
                 return out.strip()
@@ -89,7 +89,7 @@ def get_gpu_info():
         lspci = shutil.which("lspci")
         if lspci:
             try:
-                out = subprocess.check_output([lspci], text=True)
+                out = subprocess.check_output([lspci], text=True, encoding="utf-8", errors="replace")
                 gpu_lines = [
                     line.split(": ", 1)[1] if ": " in line else line
                     for line in out.splitlines()
@@ -112,7 +112,7 @@ def get_gpu_info():
         if profiler:
             try:
                 out = subprocess.check_output(
-                    [profiler, "SPDisplaysDataType"], text=True, timeout=10
+                    [profiler, "SPDisplaysDataType"], text=True, encoding="utf-8", errors="replace", timeout=10
                 )
                 names = [
                     line.split(":", 1)[1].strip()
@@ -133,7 +133,7 @@ def get_container_hint():
     if os.path.exists("/.dockerenv"):
         return "是（Docker 容器）"
     try:
-        with open("/proc/1/cgroup") as f:
+        with open("/proc/1/cgroup", encoding="utf-8") as f:
             content = f.read()
             if "docker" in content or "kubepods" in content:
                 return "是（容器環境）"

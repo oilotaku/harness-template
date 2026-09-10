@@ -82,7 +82,7 @@ def run_probe(payload) -> int:
     result = subprocess.run(
         [sys.executable, str(GUARD)],
         input=stdin,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         capture_output=True,
         cwd=str(REPO_ROOT),
         env={**os.environ, "CLAUDE_PROJECT_DIR": str(REPO_ROOT)},
@@ -95,7 +95,7 @@ def check_locks() -> None:
         return
     result = subprocess.run(
         [sys.executable, str(VERIFY_LOCKS)],
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         capture_output=True,
         cwd=str(REPO_ROOT),
         env={**os.environ, "CLAUDE_PROJECT_DIR": str(REPO_ROOT)},

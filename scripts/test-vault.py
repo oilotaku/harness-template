@@ -81,7 +81,7 @@ def run_script(script: Path, repo: Path, *args, extra_env=None) -> subprocess.Co
         env.update(extra_env)
     return subprocess.run(
         [sys.executable, str(script), *args],
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         capture_output=True,
         cwd=str(repo),
         env=env,
@@ -256,7 +256,7 @@ def _(tmp: Path):
     repo = make_repo(tmp)
     token = seal(repo)
 
-    result = run_script(RUN, repo, "--task-id", "沒這個", "--token", token)
+    result = run_script(RUN, repo, "--task-id", "NO-SUCH-TASK", "--token", token)
     assert result.returncode == 2, f"exit={result.returncode} stdout={result.stdout}"
 
 

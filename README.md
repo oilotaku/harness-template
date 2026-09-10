@@ -64,7 +64,7 @@
 python3 scripts/test-guards.py && python3 scripts/test-locks.py && python3 scripts/test-vault.py
 ```
 
-這三組（共 85 個案例）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
+這三組（共 86 個案例）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
 六種組合上自動執行（見 `.github/workflows/ci.yml`）。這個 repo 特別需要 CI，
 因為機制退化是無聲的——guard 少擋一種路徑寫法、封存腳本少刪一個檔案，
 功能看起來都還正常，只有測試會發現。CI 一開就立刻抓到一個一直存在、

@@ -43,7 +43,7 @@ def case(name):
 def run(script: Path, cwd: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(script)],
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         capture_output=True,
         cwd=cwd,
         env={**os.environ, "CLAUDE_PROJECT_DIR": str(cwd)},

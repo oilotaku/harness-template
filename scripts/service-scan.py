@@ -80,7 +80,7 @@ def scan_fallback():
         return
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10)
         print(result.stdout.strip() or "（無輸出，可能需要權限）")
     except Exception as e:  # noqa: BLE001 — 這裡刻意攔截所有例外，掃描失敗不應中斷整個流程
         print(f"（無法執行 {' '.join(cmd)}：{e}，請人工確認連接埠使用狀況）")
