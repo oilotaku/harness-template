@@ -1,5 +1,10 @@
 # 改善建議報告（2026-09-10）
 
+> ⚠️ **這份文件只給人看，不要放進任何子智能體的閱讀路徑。** 它有 39,000 多字元，
+> 比其他所有 `docs/` 加起來還大——讓一個 agent 讀它，等於一次燒掉一個 task 的
+> 固定 token 開銷（見 `docs/token-strategy.md`）。它是歷史審視紀錄，
+> 不是流程文件。
+>
 > 審視對象：`harness-template` 全部檔案（CLAUDE.md、`.claude/`、`scripts/`、
 > `docs/`、`templates/`）。所有標記為【已驗證】的問題，都是實際餵模擬的
 > PreToolUse payload 給 `scripts/guard-hidden-tests.py`、觀察 exit code 得到的結果，

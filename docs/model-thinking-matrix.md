@@ -21,7 +21,7 @@
 | Orchestrator | 恆定 opus / high | 決策影響全局，錯誤成本最高 |
 | implementer-generic / backend / frontend | 依任務等級（L1~L4）動態調整 | 大部分任務落在 L2，複雜任務才升級 |
 | verifier-test-writer | 恆定較高（至少等同該任務等級，且不低於 medium） | 測試設計得草率，整條防線就失效 |
-| verifier-reviewer | 恆定較高（建議 opus / high） | 抓作弊需要比實作更深的推理與懷疑視角 |
+| verifier-reviewer | L3/L4 恆定 opus / high；L1/L2 可先小後大（見下） | 抓作弊需要比實作更深的推理與懷疑視角 |
 | verifier-security | 恆定 opus / high | 安全問題的漏判成本極高 |
 
 ## 判斷等級的簡易問卷（Orchestrator 拆 task 時填）
@@ -31,8 +31,26 @@
 3. 這個 task 是不是重複性高、規則清楚的樣板工作？→ 是則 L1
 4. 以上皆非 → L2（預設）
 
+## 先小後大：低風險任務的驗收升級規則
+
+驗收其實是兩件性質不同的事：**跑測試**（機械執行，不需要大模型）與
+**抓作弊**（需要懷疑視角，需要大模型）。所以 L1/L2 任務可以先用中量模型
+跑第一輪驗收，出現下列任一訊號才升級到重量模型重驗：
+
+- `scripts/verify-locks.py` 或 `scripts/run-hidden-tests.py` 回報異常
+- 靜態審查發現任何可疑／取巧模式
+- 實作變更超出 task-spec 宣告的範圍邊界
+- task 標記 `security_review: true`
+
+**L3/L4 不適用這條**——跨模組、安全、金流、資料遷移這類任務，
+漏判一次的代價遠高於省下的模型差價。理由與完整成本分析見
+`docs/token-strategy.md`。
+
 ## 平行度與機器效能的關係
 
 Orchestrator 在指派模型/思考層級時，也要參考 `scripts/machine-profile.py` 的結果：
 - 記憶體/CPU 有限時，優先**減少同時執行的 L3/L4 高強度任務數量**，
   而不是把所有任務都降級成 L1（降級會犧牲品質，減少平行度才是正確做法）。
+
+> 注意：平行度是**時間**的最佳化，不是 token 的。三個 task 平行跑跟序列跑，
+> 總 token 一樣多。要省 token 請見 `docs/token-strategy.md`。
