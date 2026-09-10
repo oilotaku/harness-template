@@ -85,6 +85,56 @@ def print_fingerprint(fingerprint: dict, indent: str = "  ") -> None:
         print(f"{indent}{line}")
 
 
+def evaluate(update: bool) -> dict:
+    """比對（或更新）指紋，回傳純資料結果。
+
+    先算出結果再決定怎麼呈現，是為了讓 `--json` 跟人看的輸出走同一條邏輯——
+    兩邊各寫一次的話，遲早會出現「JSON 說相符、文字說不符」這種最糟的狀況。
+    """
+    current = current_fingerprint()
+    result = {
+        "scan": "env-guard",
+        "status": None,
+        "exit_code": 0,
+        "fingerprint": current,
+        "previous": None,
+        "mismatches": [],
+        "filled_missing": [],
+        "skipped": [],
+    }
+
+    if update and FINGERPRINT_FILE.exists():
+        result["previous"] = json.loads(FINGERPRINT_FILE.read_text(encoding="utf-8"))
+        save(current)
+        result["status"] = "updated"
+        return result
+
+    if not FINGERPRINT_FILE.exists():
+        save(current)
+        result["status"] = "created"
+        return result
+
+    recorded = json.loads(FINGERPRINT_FILE.read_text(encoding="utf-8"))
+    mismatches, missing, skipped = env_fingerprint.compare(recorded, current)
+
+    if missing:
+        # 舊版指紋檔沒有這些欄位，視為「需要補齊」而不是「不符」——
+        # 沒有紀錄過的東西無從比對起。
+        recorded.update({key: current[key] for key in missing})
+        save(recorded)
+        result["filled_missing"] = list(missing)
+
+    result["previous"] = recorded
+    result["skipped"] = [reason for _key, reason in skipped]
+    result["mismatches"] = [
+        {"field": key, "label": label, "recorded": before, "current": after}
+        for key, label, before, after in mismatches
+    ]
+    result["status"] = "mismatch" if mismatches else "ok"
+    result["exit_code"] = 1 if mismatches else 0
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="記錄並比對預期執行環境的指紋")
     parser.add_argument(
@@ -92,14 +142,28 @@ def main() -> int:
         action="store_true",
         help="把目前環境設為新的基準指紋（確認過確實換了機器之後才用）",
     )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="輸出機器可讀的 JSON（stdout 只有 JSON；exit code 與人看的模式相同）",
+    )
     args = parser.parse_args()
 
-    print("===== 環境指紋守門 =====")
-    current = current_fingerprint()
+    result = evaluate(args.update)
 
-    if args.update and FINGERPRINT_FILE.exists():
-        previous = json.loads(FINGERPRINT_FILE.read_text(encoding="utf-8"))
-        save(current)
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return result["exit_code"]
+
+    return print_human(result)
+
+
+def print_human(result: dict) -> int:
+    print("===== 環境指紋守門 =====")
+    current = result["fingerprint"]
+
+    if result["status"] == "updated":
+        previous = result["previous"]
         print("已把目前環境設為新的基準指紋。")
         print("原本記錄的環境：")
         print_fingerprint(previous)
@@ -111,8 +175,7 @@ def main() -> int:
         print("===== 結束 =====")
         return 0
 
-    if not FINGERPRINT_FILE.exists():
-        save(current)
+    if result["status"] == "created":
         print("尚未記錄過預期執行環境，已將目前環境設為基準：")
         print_fingerprint(current)
         if not current["hostname_stable"]:
@@ -124,23 +187,18 @@ def main() -> int:
         print("===== 結束 =====")
         return 0
 
-    recorded = json.loads(FINGERPRINT_FILE.read_text(encoding="utf-8"))
-    mismatches, missing, skipped = env_fingerprint.compare(recorded, current)
-
-    if missing:
-        # 舊版指紋檔沒有這些欄位，視為「需要補齊」而不是「不符」——
-        # 沒有紀錄過的東西無從比對起。
-        recorded.update({key: current[key] for key in missing})
-        save(recorded)
-        labels = "、".join(env_fingerprint.FIELD_LABELS.get(key, key) for key in missing)
+    if result["filled_missing"]:
+        labels = "、".join(
+            env_fingerprint.FIELD_LABELS.get(key, key) for key in result["filled_missing"]
+        )
         print(f"（偵測到舊版指紋檔缺少欄位：{labels}，已自動補上目前值，不視為不符）")
 
-    for _key, reason in skipped:
+    for reason in result["skipped"]:
         print(f"（{reason}）")
 
-    if mismatches:
-        for _key, label, before, after in mismatches:
-            print(f"⚠️ {label}不符：記錄為「{before}」，目前為「{after}」")
+    if result["mismatches"]:
+        for item in result["mismatches"]:
+            print(f"⚠️ {item['label']}不符：記錄為「{item['recorded']}」，目前為「{item['current']}」")
         print()
         print("狀態：不符 —— 這台機器可能跟先前規劃時不同。")
         print("請 Orchestrator 停止自動派工，向使用者確認：")

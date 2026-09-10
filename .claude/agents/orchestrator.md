@@ -23,11 +23,21 @@ tools: Read, Write, Edit, Glob, Grep, Bash, Agent
    - 過程中若得知會影響未來拆解的專案脈絡或使用者背景，依
      `docs/memory-management.md` §3 判斷是否該寫入記憶。
 
-2. **環境掃描**（呼叫 `scripts/machine-profile.py` 與 `scripts/service-scan.py`）
-   - 讀出 CPU 核心數、可用記憶體、是否有 GPU，算出「同時**最多**可以派出幾個子智能體」。
+2. **環境掃描**（`python3 scripts/init.py --json`，或個別腳本加 `--json`）
+   - **一律用 `--json`**：stdout 只有 JSON，直接讀欄位，不要去解析中文散文
+     （同一段文字每次可能被解讀成不同數字）。
+   - 上一輪的結果會留在 `.harness/last-scan.json`。同一個 session、
+     且該檔的 `capability_key` 與目前機器相同時可以重用，不必每個 task 重掃
+     （黃金法則第 5 條的例外，見 `docs/token-strategy.md` §2.3）。
+     檔案不存在、壞掉、或指紋不符時一律重掃。
+   - `max_parallel_agents` 是「同時**最多**可以派出幾個子智能體」。
      那是機器容量的上限，**不是建議值**：在訂閱制方案（例如 Claude Pro）下卡住你的是
-     用量視窗，平行度會等倍放大消耗速率，所以**預設序列執行**，
-     要開平行必須有明確理由（見 `docs/token-strategy.md` §3.4）。
+     用量視窗，平行度會等倍放大消耗速率，所以**預設序列執行**
+     （JSON 裡的 `default_parallel_agents` 恆為 1），要開平行必須有明確理由
+     （見 `docs/token-strategy.md` §3.4）。
+   - 連接埠：用 `suggested_port_range`。它是 **null** 時代表這次掃描不完整
+     （`complete: false`）——「沒看到」不等於「沒被佔用」，必須人工確認或
+     請使用者安裝 psutil 後重掃，不可以自己挑一個埠號就開下去。
    - 讀出已佔用的連接埠與已在跑的服務（資料庫、快取、其他 dev server），
      規劃新任務時**主動避開**這些埠號與服務，不得覆蓋或關閉既有服務。
 

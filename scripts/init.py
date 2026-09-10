@@ -6,11 +6,17 @@
 容易漏做或漏看某一步的警告。這支腳本把三者合併成一個入口，
 方便 `git clone`/`git pull` 之後直接執行。
 
+2026-09-10（P3-2）：新增 `--json`，把三支腳本的機器可讀輸出合併成一份文件，
+讓 Orchestrator 一次拿到全部掃描結果，不必分三次讀中文散文。
+
 用法：
     git clone <repo-url>
     cd <repo>
     python3 scripts/init.py
+    python3 scripts/init.py --json    # 給 Orchestrator 讀（stdout 只有 JSON）
 """
+import argparse
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -23,9 +29,9 @@ utf8_output.enable()  # Windows 主控台預設用 ANSI 代碼頁，不先切 UT
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 STEPS = [
-    ("機器效能掃描", "machine-profile.py"),
-    ("既有服務掃描", "service-scan.py"),
-    ("環境指紋建立/比對", "env-guard.py"),
+    ("機器效能掃描", "machine-profile.py", "machine"),
+    ("既有服務掃描", "service-scan.py", "services"),
+    ("環境指紋建立/比對", "env-guard.py", "env_guard"),
 ]
 
 
@@ -39,12 +45,57 @@ def run_step(title: str, script_name: str) -> int:
     return result.returncode
 
 
+def run_step_json(script_name: str) -> tuple:
+    """以 --json 執行單一步驟，回傳 (解析後的物件, exit code)。
+
+    解析失敗不會靜靜略過——那正是「JSON 模式卻混進了人看的輸出」這種
+    最難察覺的退化，所以把原始輸出原封不動放進 `error` 欄位讓它看得見。
+    """
+    script = SCRIPTS_DIR / script_name
+    if not script.exists():
+        return {"error": f"找不到 {script_name}"}, 0
+    result = subprocess.run(
+        [sys.executable, str(script), "--json"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    try:
+        return json.loads(result.stdout), result.returncode
+    except (json.JSONDecodeError, ValueError):
+        return {
+            "error": f"{script_name} --json 的輸出不是合法 JSON",
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }, result.returncode
+
+
+def main_json() -> int:
+    document = {"schema": 1, "status": "ok", "sections": {}}
+    env_mismatch = False
+    for _title, script_name, key in STEPS:
+        payload, returncode = run_step_json(script_name)
+        document["sections"][key] = payload
+        if script_name == "env-guard.py" and returncode != 0:
+            env_mismatch = True
+
+    if env_mismatch:
+        document["status"] = "env_mismatch"
+    print(json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True))
+    return 1 if env_mismatch else 0
+
+
 def main() -> int:
+    parser = argparse.ArgumentParser(description="harness-template 一鍵初始化")
+    parser.add_argument("--json", action="store_true", help="輸出機器可讀的 JSON（stdout 只有 JSON）")
+    args = parser.parse_args()
+
+    if args.json:
+        return main_json()
+
     print("===== harness-template 初始化 =====")
     print(f"Python：{sys.version.split()[0]}（{sys.executable}）")
 
     env_mismatch = False
-    for title, script_name in STEPS:
+    for title, script_name, _key in STEPS:
         returncode = run_step(title, script_name)
         if script_name == "env-guard.py" and returncode != 0:
             env_mismatch = True

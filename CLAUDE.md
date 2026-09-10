@@ -20,7 +20,8 @@
 4. **實作者嚴禁超出任務規格範圍發揮**（禁止幻覺出未要求的功能、禁止「順手重構」不相關程式碼）。
 5. **任何任務開始前，主導智能體 (Orchestrator) 必須先執行機器效能與既有服務掃描**，
    才能決定平行子智能體數量與可用的連接埠/服務。
-   （同一個 session、且 `env-guard.py` 判定指紋相符時，可重用上一輪的掃描結果，
+   （掃描一律用 `--json`：`python3 scripts/init.py --json`。同一個 session、
+   且 `.harness/last-scan.json` 的能力指紋與目前機器相同時，可重用上一輪的結果，
    不必每個 task 重掃；跨 session 或指紋不符一律重掃。見 `docs/token-strategy.md`。）
 6. **偵測到目前機器可能不是預期的執行環境（例如 hostname、OS 指紋不符）時，
    必須停下來向使用者確認，不可自行假設。**
@@ -111,7 +112,7 @@ harness-template/
 └── templates/                    ← task-spec 與驗收報告範本（含 examples/ 範例）
 ```
 
-> `.harness/`（環境指紋、鎖定清單、隱藏測試 manifest、進度檢查點）與封存庫（repo 之外）
+> `.harness/`（環境指紋、鎖定清單、隱藏測試 manifest、進度檢查點、掃描快取）與封存庫（repo 之外）
 > 都不會進版控，前者已在 `.gitignore`，後者根本不在 repo 裡。
 
 ---
