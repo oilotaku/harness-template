@@ -4,6 +4,25 @@
 見 HARNESS_PROGRESS_PREFIX）或已鎖定公開測試的寫入，強制實作者/檢驗者分離
 （黃金法則第 1 條）。
 
+P0-3 收尾（2026-09-10）：Bash 分支改成「不分動詞」。
+    舊版只看每個 segment 的第一個 token 是不是已知動詞，於是換一種包裝就穿過去：
+    `bash -c '...'`、`find … -delete`、`| xargs rm`、`tar cf out.tar <暫存區>`、
+    `$(cat …)`、變數指派後再展開。動詞清單是列舉的、包裝方式是無限的，
+    這場仗結構上贏不了，所以改問一個有界的問題：**這段指令裡有沒有任何一段
+    解析得出受保護的隱藏測試路徑**——有就擋。
+
+    界定過的範圍（誠實記載，不要以為擋光了）：
+      - 擋得到：任何**把路徑寫出來**的寫法，含引號內、變數指派、絕對路徑、
+        Windows 反斜線。
+      - 擋不到：完全不寫出路徑的混淆（base64 解碼、逐字元組字串、
+        從檔案讀出路徑再用）。那是無限的攻擊面，這一層不試圖窮盡——
+        真正的防線是 P1-1：隱藏測試已加密搬到 repo 之外，穿過去也只讀到密文。
+        **這一層是縱深防禦，不是主防線。**
+
+    已知的代價：指令字串裡「提到」這個路徑就會被擋，即使只是要把它寫進檔案內容
+    （例如寫一份提到暫存區的文件）。那條路請用 Write/Edit 工具——它只看目標檔案，
+    不看內容。多擋一點是安全的，少擋一點才危險。
+
 歷史（2026-09-09 code review 後的第二版）：第一版只用「整個指令字串裡有沒有
 出現保護路徑的子字串」+「整個指令字串裡有沒有出現寫入類關鍵字」這種粗略比對，
 被抓到多個可繞過的洞：
@@ -429,12 +448,81 @@ def _extract_redirect_targets(raw_segment: str):
     return targets
 
 
+# 路徑在指令字串裡的左右邊界。用來把 `-s tests/hidden`、`D=tests/hidden`、
+# `$(cat tests/hidden/x)` 這些寫法裡的路徑片段切出來。
+PATH_BOUNDARY = set(" \t\n'\"`,;|&()<>=$*")
+
+
+def _hidden_literal_fragments() -> list:
+    """從受保護路徑樣式取出可用來定位的字面片段。
+
+    `packages/*/tests/hidden` 取 `tests/hidden`——萬用字元那段沒有字面內容，
+    定位不了。片段只用來「找到可能的位置」，是不是真的受保護仍然由
+    `_to_repo_relative()` + `_is_hidden_tests_path()` 決定，
+    所以片段寬一點不會造成誤擋。
+    """
+    fragments = []
+    for pattern in HIDDEN_TEST_PATTERNS:
+        pieces = [piece.strip("/") for piece in pattern.replace("?", "*").split("*")]
+        longest = max(pieces, key=len) if pieces else ""
+        if longest:
+            fragments.append(longest)
+    return fragments
+
+
+def _mentions_hidden_path(raw_segment: str, cwd=None):
+    """指令片段裡有沒有任何一段解析得出受保護的隱藏測試路徑。
+
+    刻意**不是**子字串比對：`templates/examples/demo-fizzbuzz/tests/hidden`
+    含有 `tests/hidden` 卻不在受保護路徑內（那是刻意留著的示範目錄），
+    子字串比對會誤傷它。這裡把片段左右擴張回完整的路徑寫法，
+    再交給既有的正規化邏輯判斷。
+    """
+    normalized = raw_segment.replace("\\", "/")
+    for fragment in _hidden_literal_fragments():
+        start = normalized.find(fragment)
+        while start != -1:
+            left = start
+            while left > 0 and normalized[left - 1] not in PATH_BOUNDARY:
+                left -= 1
+            right = start + len(fragment)
+            while right < len(normalized) and normalized[right] not in PATH_BOUNDARY:
+                right += 1
+            candidate = normalized[left:right]
+            if _is_hidden_tests_path(_to_repo_relative(candidate, cwd)):
+                return candidate
+            start = normalized.find(fragment, start + 1)
+    return None
+
+
 def _check_bash_command(command: str, locked: set):
     normalized = _normalize(command)
     segments = [s for s in SEGMENT_SPLIT.split(normalized) if s.strip()]
 
     cwd = REPO_ROOT  # 虛擬工作目錄（絕對路徑），跟著 `cd` 走
     for raw_segment in segments:
+        # 隱藏測試暫存區（P0-3 收尾）：跟封存庫同一個道理——**不分動詞**。
+        # 舊版只看每個 segment 的第一個 token 是不是已知動詞，於是換一種包裝就穿過去：
+        # `bash -c '...'`、`find … -delete`、`| xargs rm`、`tar cf out.tar tests/hidden`、
+        # `$(cat …)`、`D=tests/hidden; cat $D/x`。動詞清單是列舉的，包裝方式是無限的，
+        # 這場仗結構上贏不了。所以改問一個有界的問題：
+        #
+        #     這段指令裡，有沒有任何一段**解析得出受保護的隱藏測試路徑**？
+        #
+        # 有就擋。implementer 沒有任何正當理由在 Bash 指令裡指名暫存區；
+        # 檢驗者要跑隱藏測試的唯一入口是 run-hidden-tests.py，而它不會把路徑
+        # 寫進指令字串。
+        mention = _mentions_hidden_path(raw_segment, cwd)
+        if mention:
+            return (
+                f"拒絕：指令裡出現了隱藏測試暫存區的路徑（「{mention}」）。"
+                "不論用什麼指令包裝（bash -c、find、xargs、tar、$(…)、變數展開），"
+                "只要指到暫存區一律擋下。"
+                "要執行隱藏測試請用 `python3 scripts/run-hidden-tests.py`（需要權杖）；"
+                "若你只是想把這個路徑寫進某個檔案的內容（例如寫測試或文件），"
+                "改用 Write/Edit 工具——那條路只看目標檔案，不看內容。"
+            )
+
         try:
             tokens = shlex.split(raw_segment, posix=True)
         except ValueError:
