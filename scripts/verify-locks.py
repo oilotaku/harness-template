@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """verify-locks.py — 事後稽核：已鎖定的公開測試有沒有被竄改
 
-對應 docs/improvement-suggestions.md 的 P1-2。
+對應 docs/history/improvement-suggestions.md 的 P1-2。
 
 為什麼需要這支：`guard-hidden-tests.py` 是「事前攔截」，而事前攔截有兩個
 先天弱點——(1) 它靠列舉路徑寫法來判斷，總會有沒想到的繞法；(2) 它是 hook，

@@ -6,7 +6,7 @@
 是因為兩支腳本都以「repo 根目錄」為基準（CLAUDE_PROJECT_DIR / cwd），
 用子行程才能乾淨地換掉那個基準。
 
-對應 docs/improvement-suggestions.md 的 P1-2：鎖定清單改成帶 sha256 的格式，
+對應 docs/history/improvement-suggestions.md 的 P1-2：鎖定清單改成帶 sha256 的格式，
 並新增 verify-locks.py 做事後稽核。這批測試存在的理由跟 test-guards.py 一樣——
 稽核機制本身壞掉時，必須有人會發現。
 

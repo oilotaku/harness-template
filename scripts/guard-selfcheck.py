@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """guard-selfcheck.py — SessionStart hook：確認防作弊機制這次真的有生效
 
-對應 docs/improvement-suggestions.md 的 P0-5。
+對應 docs/history/improvement-suggestions.md 的 P0-5。
 
 `guard-hidden-tests.py` 已經改成 fail-closed（自己出錯時擋下操作），但那只
 救得了「腳本有被執行到」的情況。如果 hook 根本沒被執行——找不到 python3、
@@ -13,11 +13,19 @@ hook 設定被改掉或刪掉、路徑寫錯、腳本檔案不存在——Claude
 payload 實際跑一次 guard，把結果印出來。SessionStart hook 的 stdout 會進入
 session 的上下文，所以防護一旦失效，Orchestrator 與使用者第一時間就看得到。
 
-本腳本一律以 exit code 0 結束——它的任務是「回報」，不是「阻止 session 開始」。
+本腳本預設一律以 exit code 0 結束——它的任務是「回報」，不是「阻止 session 開始」。
+加 `--strict` 時（第二輪 P3-6，給 verifier-reviewer 在驗收第 0 步跑）：找不到 guard、
+任何探測不符預期、或設定檔壞掉，就回 exit 1——子智能體是新 session，不會再跑一次
+SessionStart hook，hook 若在派工中途失效，只有這一步能讓 verifier 知道。
+
+第二輪 P1-7：另外對每個受保護的隱藏測試路徑跑 `git check-ignore`，沒被忽略就警告——
+明文一旦進了 git 歷史，封存就沒有意義。
 """
+import argparse
 import fnmatch
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -117,14 +125,14 @@ SCAN_SKIP_DIRS = {
 }
 
 
-def check_config() -> None:
-    """回報受保護路徑，並在「專案有測試但都沒被保護」時明確警告。"""
+def check_config() -> bool:
+    """回報受保護路徑，並在「專案有測試但都沒被保護」時明確警告。回傳設定是否健康。"""
     try:
         config = harness_config.load(REPO_ROOT)
     except harness_config.ConfigError as exc:
         print(f"⚠️ {harness_config.CONFIG_FILENAME} 有問題：{exc}")
         print("在修好之前，guard hook 會 fail-closed 擋下所有工具呼叫。")
-        return
+        return False
 
     hidden = config["hidden_test_paths"]
     public = config["public_test_paths"]
@@ -137,7 +145,7 @@ def check_config() -> None:
         or harness_config.existing_dirs(public, REPO_ROOT)
     )
     if configured_exists:
-        return
+        return True
 
     # 設定的測試目錄一個都不存在時，看看專案裡是不是其實有測試放在別的地方。
     stray = []
@@ -163,6 +171,44 @@ def check_config() -> None:
         print(f"請在 {harness_config.CONFIG_FILENAME} 指定你的專案慣例，例如：")
         print('  {"public_test_paths": ["tests"], "hidden_test_paths": [".harness-hidden-staging"]}')
         print("詳見 docs/multi-language-support.md。")
+    return True
+
+
+def check_gitignore() -> None:
+    """每個隱藏測試暫存區都必須被 .gitignore 排除（第二輪 P1-7）。
+
+    明文一旦進了 git 歷史，`git log -p` 就永遠讀得到——指令字串裡完全不需要出現
+    暫存區路徑，封存腳本刪掉工作目錄裡的檔案對歷史也沒有作用。
+    不是 git repo、或沒裝 git 時不檢查（沒有歷史可以外洩）。
+    """
+    if shutil.which("git") is None or not (REPO_ROOT / ".git").exists():
+        return
+    try:
+        patterns = harness_config.load(REPO_ROOT)["hidden_test_paths"]
+    except harness_config.ConfigError:
+        return
+
+    unignored = []
+    for pattern in patterns:
+        base = pattern.split("*")[0].split("?")[0].strip("/")
+        if not base:
+            continue
+        probe = f"{base}/__gitignore_probe__.py"
+        result = subprocess.run(
+            ["git", "check-ignore", "-q", probe],
+            cwd=str(REPO_ROOT), capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+        if result.returncode != 0:
+            unignored.append(pattern)
+
+    if unignored:
+        print()
+        print("⚠️ 這些隱藏測試暫存區**沒有被 .gitignore 排除**：")
+        for pattern in unignored:
+            print(f"    {pattern}")
+        print("寫在這裡的明文只要被 commit 一次，`git log -p` 就永遠讀得到，封存也救不回來。")
+        print("請在 .gitignore 加上對應規則（本模板預設有 tests/hidden/* 那組，")
+        print("自訂路徑要自己加），seal-hidden-tests.py 也會拒絕封存已進歷史的檔案。")
 
 
 # 一個目錄要被視為「已知不受保護」，只要它自己寫明這件事就好——
@@ -260,13 +306,21 @@ def check_locks() -> None:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="確認防作弊機制這次真的有生效")
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="任何一項防護不符預期就回 exit 1（verifier-reviewer 驗收第 0 步用）",
+    )
+    args = parser.parse_args()
+
     print("===== 防作弊機制自我檢查（SessionStart）=====")
 
     if not GUARD.exists():
         print(f"⚠️ 找不到 {GUARD}——隱藏測試防護目前**完全沒有生效**。")
         print("在修好之前，不要把任何 task 交給 implementer，隱藏測試等同公開。")
         print("===== 結束 =====")
-        return 0
+        return 1 if args.strict else 0
 
     failures = []
     for name, payload, expected in PROBES:
@@ -278,15 +332,21 @@ def main() -> int:
         print(f"⚠️ 防護未如預期運作，{len(failures)}/{len(PROBES)} 項檢查失敗：")
         for item in failures:
             print(f"  - {item}")
-        print("這代表 tests/hidden/ 目前可能讀得到或改得到。")
+        print("這代表隱藏測試暫存區目前可能讀得到或改得到。")
         print("請先執行 python3 scripts/test-guards.py 找出原因，修好之前不要派工給 implementer。")
     else:
         print(f"防護正常：{len(PROBES)}/{len(PROBES)} 項檢查符合預期（隱藏測試讀寫皆被擋、一般檔案不受影響）。")
 
-    check_config()
+    config_ok = check_config()
+    check_gitignore()
     check_unprotected_hidden_dirs()
     check_locks()
     print("===== 結束 =====")
+
+    if args.strict and (failures or not config_ok):
+        # 子智能體是新 session，不會再跑一次 SessionStart hook；
+        # verifier-reviewer 靠這個非零 exit 知道「防護在派工中途失效了」。
+        return 1
     return 0
 
 

@@ -2,7 +2,7 @@
 """machine_facts.py — 蒐集「這台機器是什麼樣子」的事實（不負責印出來）
 
 原本這些函式都寫在 `machine-profile.py` 裡，2026-09-10（對應
-docs/improvement-suggestions.md 的 P3-1）抽出來成為共用模組，因為
+docs/history/improvement-suggestions.md 的 P3-1）抽出來成為共用模組，因為
 `env-guard.py` 也需要同一批事實來判斷「這是不是同一台機器」——
 指紋不能只看 hostname，容器每次重建 hostname 都是隨機的（見該腳本說明）。
 

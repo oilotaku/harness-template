@@ -69,7 +69,7 @@ frontmatter 的 `thinking` 欄位**不會被 Claude Code 讀取**，它只是本
 
 6. **派工（檢驗者必須先於實作者）**
    - 對每個 task：先指派給對應的 `verifier-test-writer`，
-     等公開測試鎖定（`lock-tests.py`）、隱藏測試封存（`seal-hidden-tests.py`）
+     等隱藏測試封存（`seal-hidden-tests.py`，會一併鎖定公開測試）與基線執行（`run-hidden-tests.py --baseline`，證明測試在沒有實作時是紅的）
      完成後，才把 task-spec + 公開測試交給對應的 `implementer-*`。
    - 實作完成後，交給 `verifier-reviewer`（必要時加 `verifier-security`）驗收。
 

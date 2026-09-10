@@ -277,7 +277,7 @@ P0-3 收尾的「不分動詞」規則只套在**隱藏測試暫存區**；已�
    以 `-i` 開頭或含 `i` 的合併短旗標（`-pi`、`-pie`）就當 in-place。
    這仍是列舉式的，所以文件要繼續寫明「主防線是事後稽核」。
 
-### P2-7. `docs/improvement-suggestions.md` 的進度表過時，跟 README 矛盾
+### P2-7. `docs/history/improvement-suggestions.md` 的進度表過時，跟 README 矛盾
 
 該檔第 30 行的進度表寫「其餘 P1-3 / P2 / P3-2 / P3-4 / P3-5 ⬜ 未動」，
 但底下各節全部標了 ✅，README 也說「18 項，全部結案」。讀者會相信表格。
@@ -323,7 +323,7 @@ verifier-reviewer 不會知道。建議給 `guard-selfcheck.py` 加 `--strict`
 - 沒有任何靜態檢查：`python -m compileall scripts`（抓語法錯，尤其是只在 3.9
   才會出現的）或 `ruff check` 各一步，成本極低。
 
-### P3-8. `docs/improvement-suggestions.md` 放在 `docs/` 跟「細節一律放 `docs/`」的規則衝突
+### P3-8. `docs/history/improvement-suggestions.md` 放在 `docs/` 跟「細節一律放 `docs/`」的規則衝突
 
 `CLAUDE.md` §5 說「`CLAUDE.md` 只寫規則與指向，細節一律放 `docs/`」，
 等於告訴每個子智能體「答案在 `docs/`」；同一個目錄裡躺著一份 39,000 字元、
@@ -354,6 +354,45 @@ implementer 可以用腳本清掉自己的失敗紀錄，讓 `should_stop` 永�
 | 7 | P2-8 / P2-9 / P3 系列 | 可用性 |
 
 1～3 建議做成同一個 PR：三者都要動 manifest 格式與 `hidden_vault.py`，分開做會升三次版本。
+
+---
+
+## 落地紀錄（2026-09-10，全部一個 PR）
+
+十四項全部做完，比建議順序更集中：所有會動 manifest 的項目（P0-6 / P0-7 / P1-5 /
+P1-6 / P2-9 / P3-9）一起升到 manifest 版本 2，只升一次。下面只記**跟草案不一樣的地方**
+與實作時被自己的測試抓到的問題；跟草案一致的不重複。
+
+| 項目 | 狀態 | 偏離草案 / 值得記的事 |
+|---|---|---|
+| P0-6 manifest 簽章 | ✅ | 照草案。另加「JSON 重排不影響簽章」案例——`save_manifest` 的 `sort_keys` 一寫回去就會把不對順序敏感的簽章弄壞，這條測試在寫完 seal 之前就先紅過。 |
+| P0-7 鎖定清單 | ✅ | 採草案的第 4 點：`seal-hidden-tests.py` 自己呼叫鎖定，順序問題消失。代價是 test-writer 若在封存後修公開測試必須**重新封存**，只跑 `lock-tests.py` 會被 runner 判成「清單被改寫」——寫進 `verifier-test-writer.md`。 |
+| P1-5 每檔金鑰 | ✅ | 照草案。`KEYSTREAM_INFO` 也換成 v2，舊密文與新金鑰推導完全不相容。 |
+| P1-6 `--baseline` | ✅ | 照草案。零測試在基線模式也算無效（「一個測試都沒跑到」證明不了任何事）。 |
+| P1-7 gitignore | ✅ | 封存前的 git 檢查**逐檔**做而不是查整個暫存區——暫存區的 README / .gitkeep 本來就刻意進版控。 |
+| P1-8 威脅模型 | ✅ | 誠實版本寫進 `hidden_vault.py` 模組說明、`seal` 的輸出、README 的「它擋什麼、不擋什麼」、workflow 文件的權限保證一節。 |
+| P2-6 公開測試事前層 | ✅ | `git checkout/restore/reset/stash/clean/switch/mv/rm` 的路徑參數當寫入候選；`git apply/am` 從 argv 看不出目標，**只要有鎖定清單就一律擋**（比草案保守）；`sed/perl/ruby` 合併短旗標含 `i` 就當 in-place。文件維持寫「主防線是事後稽核」。 |
+| P2-7 進度表 | ✅ | 改成 ✅ 並註明 PR；P0-3 那列改寫成「只涵蓋暫存區」。 |
+| P2-8 `/task-plan` | ✅ | 指令檔改成只指向 `orchestrator.md`，加漂移測試「不得再出現編號步驟」。 |
+| P2-9 字面大括號 | ✅（半） | 代換改用 `str.replace`；**沒有**照草案在 `harness_config.load()` 拒絕未知的 `{…}`——那正好會擋掉 Go 的 `-run '^Test{Foo}$'`，跟這一項要解的問題矛盾。字面大括號現在是合法內容，有整合測試。 |
+| P3-6 `--strict` | ✅ | 照草案；`verifier-reviewer.md` 第 0 步先跑它再跑 `verify-locks.py`。 |
+| P3-7 CI | ✅（部分） | 加了 `concurrency`、`compileall`、`.github/dependabot.yml`。**沒有把 action pin 到 commit SHA**——SHA 得從 GitHub 實際查證，不能憑印象寫；留給 Dependabot 的 PR 帶進來。 |
+| P3-8 搬到 `docs/history/` | ✅ | 兩份審視報告都搬了，21 處引用一起改。 |
+| P3-9 attempts 簽章 | ✅（比草案多一層） | 逐筆 HMAC 抓得到改寫，**抓不到整筆刪除**——而「砍掉最後幾次失敗」正是最有動機的竄改。所以 runner 另把「已記錄幾筆」寫進簽過章的 manifest，`show-attempts --token` 兩個都驗。 |
+
+### 實作時被自己的測試抓到的兩個問題
+
+1. **簽章金鑰跟著權杖走，重新封存就換金鑰**——第一版把舊權杖簽的紀錄全判成「簽章不符」，
+   於是連續失敗三次的 task 反而變成「次數不可信、should_stop 未知」，停損提醒消失。
+   修法：每筆紀錄帶 `key_id`，別把金鑰簽的算 `partial`（驗不了，但不是竄改），
+   缺簽章或這把金鑰驗不過的才算 `tampered`。停損看的是尾端連續失敗，而尾端一定是
+   現在這把金鑰簽的，所以 `partial` 不影響判斷。
+2. runner 的 `_record_attempt` 改簽名時漏傳一個參數，讓所有「全部通過」的正式執行
+   都以 traceback 結束、exit 1——三組測試同時紅，一眼就看到。這也是 `compileall`
+   抓不到的那類錯（簽名對得上、呼叫對不上），只有整合測試會發現。
+
+回歸測試 253 → **290**（`test-vault.py` 19 → 36、`test-guards.py` 77 → 90、
+`test-attempts.py` 20 → 27），九組在本機與非 UTF-8 locale 下皆全數通過。
 
 ---
 

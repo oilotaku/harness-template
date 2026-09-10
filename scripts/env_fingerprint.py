@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """env_fingerprint.py — 環境指紋的組成與比對規則（純邏輯，不做 I/O 與輸出）
 
-對應 docs/improvement-suggestions.md 的 P3-1。
+對應 docs/history/improvement-suggestions.md 的 P3-1。
 
 ## 問題
 

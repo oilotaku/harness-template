@@ -60,7 +60,7 @@ P0-3 收尾（2026-09-10）：Bash 分支改成「不分動詞」。
    （hook 無法區分呼叫者），因此它必須靠**執行**測試而不是打開檔案來
    驗收，細節見 `.claude/agents/verifier-reviewer.md`。
 
-歷史（2026-09-10 第三版，對應 docs/improvement-suggestions.md 的 P0-1 與 P0-5）：
+歷史（2026-09-10 第三版，對應 docs/history/improvement-suggestions.md 的 P0-1 與 P0-5）：
 第二版有兩條路徑在做同一件事卻用了不同標準——Bash 分支會先把相對路徑正規化
 再比對，但 Edit/Write/Read/Grep/Glob 分支只把反斜線換成正斜線，然後直接對
 "tests/hidden" 做字串前綴比對。結果是同一個檔案換個寫法就擋不到（實測）：
@@ -226,6 +226,33 @@ READ_TOOL_PATH_FIELDS = {
 # 會造成寫入/變更的指令動詞（第一個 token，已剝除 sudo/環境變數前綴）。
 # 這些動詞後面的每個非旗標參數都視為候選的「寫入目標」。
 WRITE_VERBS = {"rm", "mv", "cp", "tee", "truncate", "install", "ln", "patch", "rsync"}
+
+# 第二輪 P2-6：已鎖定公開測試的事前層原本只認 WRITE_VERBS + `sed -i` + `dd` + `git rm`，
+# 於是 `git checkout HEAD~1 -- <鎖定檔>`、`git restore`、`perl -pi -e` 都放行。
+# 這裡不能照抄暫存區的「不分動詞」規則——implementer 有正當理由**讀**公開測試——
+# 所以只把「明確會改寫工作目錄」的動詞補進來。這仍是列舉式的，主防線是事後稽核
+# （verify-locks.py），文件也這樣寫。
+GIT_WRITE_SUBCOMMANDS = {"rm", "mv", "checkout", "restore", "reset", "stash", "clean", "switch"}
+# apply / am 的目標寫在 patch 內容裡，從 argv 看不出會改到哪個檔案；
+# 只要目前有已鎖定的公開測試就一律擋——implementer 沒有正當理由在驗收期間套 patch。
+GIT_PATCH_SUBCOMMANDS = {"apply", "am"}
+INPLACE_EDITOR_VERBS = {"sed", "perl", "ruby"}
+
+
+def _has_inplace_flag(args) -> bool:
+    """`-i`、`-i.bak`、`--in-place`、以及合併短旗標裡含 i 的 `-pi` / `-pie` / `-ni`。
+
+    寬一點是刻意的：`perl -Ilib x.pl` 也會命中（I 後面接 lib 的 i），
+    但它只會讓非旗標參數進入寫入候選，命中受保護路徑才會擋。多擋一點是安全的。
+    """
+    for arg in args:
+        if arg == "--in-place" or arg.startswith("--in-place"):
+            return True
+        if arg.startswith("-") and not arg.startswith("--"):
+            cluster = arg[1:].split("=", 1)[0]
+            if "i" in cluster:
+                return True
+    return False
 
 # 純讀取/檢視類指令：不會寫入，但會把內容印出來或打開編輯器，
 # 只要目標命中 tests/hidden/ 就視為「看到隱藏測試」而擋下。
@@ -557,19 +584,23 @@ def _check_bash_command(command: str, locked: set):
 
         if verb in WRITE_VERBS:
             write_candidates.extend(a for a in args if not a.startswith("-"))
-        elif verb == "sed":
-            has_inplace = any(
-                a == "-i" or a.startswith("-i") or a == "--in-place" or a.startswith("--in-place")
-                for a in args
-            )
-            if has_inplace:
+        elif verb in INPLACE_EDITOR_VERBS:
+            if _has_inplace_flag(args):
                 write_candidates.extend(a for a in args if not a.startswith("-"))
         elif verb == "dd":
             for a in args:
                 if a.startswith("of="):
                     write_candidates.append(a[len("of="):])
-        elif verb == "git" and args and args[0] == "rm":
-            write_candidates.extend(a for a in args[1:] if not a.startswith("-"))
+        elif verb == "git" and args:
+            subcommand = args[0]
+            if subcommand in GIT_WRITE_SUBCOMMANDS:
+                write_candidates.extend(a for a in args[1:] if not a.startswith("-"))
+            elif subcommand in GIT_PATCH_SUBCOMMANDS and locked:
+                return (
+                    f"拒絕：`git {subcommand}` 會依 patch 內容改寫工作目錄，從指令看不出會動到"
+                    "哪些檔案，而目前有已鎖定的公開測試。驗收期間 implementer 沒有正當理由套 patch；"
+                    "若為誤判，請請 Orchestrator / verifier 協助處理。"
+                )
         elif verb in READ_VIEW_VERBS:
             read_candidates.extend(a for a in args if not a.startswith("-"))
 

@@ -2,7 +2,7 @@
 """machine-profile.py — 跨平台機器效能掃描（取代 bash 版本，Win/Linux/Mac 通用）
 對應需求第 12 點：必須根據實際機器效能規劃任務
 
-2026-09-10（對應 docs/improvement-suggestions.md 的 P3-1）：事實蒐集的部分
+2026-09-10（對應 docs/history/improvement-suggestions.md 的 P3-1）：事實蒐集的部分
 （記憶體、GPU、容器判斷）抽到 `scripts/machine_facts.py`，因為 `env-guard.py`
 也需要同一批事實來判斷「這是不是同一台機器」。
 

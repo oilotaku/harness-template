@@ -161,18 +161,28 @@ python3 -m unittest discover -s tests/hidden -p 'test_*.py'
 python3 scripts/seal-hidden-tests.py --task-id T-001
 ```
 
-它會印出一串**只出現這一次**的執行權杖。接著自己確認三件事：
+它會先鎖定公開測試、再逐檔加密搬走、再用權杖簽章 manifest，最後印出一串
+**只出現這一次**的執行權杖。接著自己確認四件事：
 
 1. 暫存區裡已經沒有明文了（檔案被搬走）
 2. 封存庫在 repo 之外，而且內容是密文
-3. 用權杖才跑得動：
+3. 基線執行——證明這份隱藏測試在沒有實作時是紅的：
+
+   ```bash
+   python3 scripts/run-hidden-tests.py --task-id T-001 --token <權杖> --baseline
+   ```
+
+   紅了它會把結果簽進 manifest；綠了它會直接告訴你「沒有鑑別力」。
+   這一跑不計入停損次數。
+4. 用權杖才跑得動正式驗收：
 
    ```bash
    python3 scripts/run-hidden-tests.py --task-id T-001 --token <權杖>
    ```
 
-   故意打錯權杖，它會拒絕——**沒有救援路徑是刻意的**，權杖遺失只能重寫一份
-   隱藏測試再封存一次。留後門等於留繞過方式。
+   故意打錯權杖，它會拒絕；用一支腳本改 `.harness/hidden-manifest.json` 裡的
+   `test_command`，它也會拒絕（簽章不符）——**沒有救援路徑是刻意的**，
+   權杖遺失只能重寫一份隱藏測試再封存一次。留後門等於留繞過方式。
 
 > **在 Claude Code 裡跑會被擋，在一般終端機不會。**
 > `guard-hidden-tests.py` 是 Claude Code 的 PreToolUse hook，只在 Claude Code
@@ -228,7 +238,7 @@ python3 scripts/test-guards.py && python3 scripts/test-locks.py \
   && python3 scripts/test-attempts.py
 ```
 
-九組、253 個案例應該全數通過。這也是最快的「我裝完整了嗎」檢查。
+九組、290 個案例應該全數通過。這也是最快的「我裝完整了嗎」檢查。
 
 ---
 

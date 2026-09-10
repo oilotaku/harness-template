@@ -27,13 +27,14 @@
 | P3-3 沒有 CI | ✅ 已修正 | 新增 `.github/workflows/ci.yml`：3 平台 × 2 個 Python 版本跑全部回歸測試 |
 | P3-1 env-guard 在容器每次誤報 | ✅ 已修正 | 指紋改成「身分／能力」分開比對、新增 `--update`，並抽出 `machine_facts.py` 與 `env_fingerprint.py` |
 | P1-4 保護路徑寫死 | ✅ 已修正 | 新增 `harness.config.json` 與 `harness_config.py`；設定錯誤 fail-closed；selfcheck 會警告「有測試但沒被保護」 |
-| 其餘 P1-3 / P2 / P3-2 / P3-4 / P3-5 | ⬜ 未動 | 見下方各節 |
+| P1-3 / P2-1 / P2-2 / P2-3 / P2-5 / P3-2 / P3-4 / P3-5 | ✅ 已修正 | 分別落地於 PR #5（P3-2）、#7（P2-1/2/5、P3-4）、#8（P1-3、P2-3、P3-5）；見下方各節的「實際落地」 |
+| P0-3 Bash 包裝繞過 | ✅ 已修正（先界定範圍） | PR #9；**只涵蓋隱藏測試暫存區**。已鎖定公開測試的事前層仍是動詞清單，主防線是事後稽核——見第二輪 P2-6 |
 
 已修正的項目在小節標題標上「✅ 已修正」，內文保留原本的問題描述當作紀錄。
-回歸測試：`test-guards.py`（77）、`test-locks.py`（12）、`test-vault.py`（19）、
+回歸測試：`test-guards.py`（90）、`test-locks.py`（12）、`test-vault.py`（36）、
 `test-env-guard.py`（16）、`test-config.py`（24）、`test-scan-json.py`（32）、
-`test-timing.py`（26）、`test-skills.py`（27）、`test-attempts.py`（20），
-共 **253 案例**，
+`test-timing.py`（26）、`test-skills.py`（27）、`test-attempts.py`（27），
+共 **290 案例**，
 並由 CI 在三個平台 × 兩個 Python 版本上自動執行。
 
 ---
