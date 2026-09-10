@@ -372,8 +372,13 @@ def _(tmp: Path):
     assert result.returncode == 0, f"exit={result.returncode} stderr={result.stderr}"
 
 
-@case("Bash 執行隱藏測試（python3 -m unittest，非 -c/-e）不該被擋")
+@case("直接用 unittest 跑暫存區的隱藏測試應被擋（唯一入口是 run-hidden-tests.py）")
 def _(tmp: Path):
+    # 這個案例的預期在 P0-3 收尾時**刻意翻轉**了。
+    # 舊版寫的是「python3 -m unittest discover -s <暫存區> 不該被擋」，那是 P1-1
+    # （加密封存）之前的假設：當時暫存區就是隱藏測試的存放處，擋掉等於沒人跑得了。
+    # P1-1 之後唯一的合法入口是 run-hidden-tests.py（需要權杖），而直接跑暫存區
+    # 會把通過/失敗變成可反覆查詢的 oracle——正是整套機制要防的事。
     result = run_guard(
         tmp,
         {
@@ -383,7 +388,7 @@ def _(tmp: Path):
             },
         },
     )
-    assert result.returncode == 0, f"exit={result.returncode} stderr={result.stderr}"
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
 
 
 # ------------------------------------------------------------ Read/Grep/Glob
@@ -669,6 +674,121 @@ def _(tmp: Path):
             problems.append(f"{path.name}：推理強度段落沒有對應到 frontmatter 的 {level}")
 
     assert not problems, "；".join(problems)
+
+
+# ---------------------------------------------------------------- P0-3 收尾
+# 這批是審視報告 P0-3 列出的六類結構性繞過。它們的共同點是「動詞比對」看不到
+# 真正的動作：包在 bash -c 裡、藏在 find/xargs/tar 的參數裡、或先存進變數再展開。
+# 界定過的範圍：**只要指令字串裡有任何一段解析得出受保護的隱藏測試路徑就擋**，
+# 不再問動詞是什麼。沒有寫出路徑的混淆（base64、逐字元組字串）不在範圍內，
+# 那由加密封存擋（見 guard 的模組說明）。
+
+@case("P0-3：bash -c 包起來的讀取應被擋")
+def _(tmp: Path):
+    result = run_guard(
+        tmp,
+        {"tool_name": "Bash", "tool_input": {"command": "bash -c 'cat tests/hidden/test_x.py'"}},
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-3：sh -c 包起來的刪除應被擋")
+def _(tmp: Path):
+    result = run_guard(
+        tmp,
+        {"tool_name": "Bash", "tool_input": {"command": 'sh -c "rm tests/hidden/test_x.py"'}},
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-3：find -delete 應被擋（find 既不是寫入動詞也不是讀取動詞）")
+def _(tmp: Path):
+    result = run_guard(
+        tmp,
+        {"tool_name": "Bash", "tool_input": {"command": "find tests/hidden -name '*.py' -delete"}},
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-3：管線接 xargs 應被擋（真正的動詞在 xargs 後面看不到）")
+def _(tmp: Path):
+    result = run_guard(
+        tmp, {"tool_name": "Bash", "tool_input": {"command": "ls tests/hidden | xargs rm"}}
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-3：tar 打包整個隱藏測試目錄應被擋")
+def _(tmp: Path):
+    result = run_guard(
+        tmp, {"tool_name": "Bash", "tool_input": {"command": "tar cf out.tar tests/hidden"}}
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-3：command substitution 應被擋")
+def _(tmp: Path):
+    for command in ("echo $(cat tests/hidden/test_x.py)", "echo `cat tests/hidden/test_x.py`"):
+        result = run_guard(tmp, {"tool_name": "Bash", "tool_input": {"command": command}})
+        assert result.returncode == 2, f"{command} → exit={result.returncode}"
+
+
+@case("P0-3：先存進變數再展開應被擋")
+def _(tmp: Path):
+    result = run_guard(
+        tmp,
+        {"tool_name": "Bash", "tool_input": {"command": "D=tests/hidden; cat $D/test_x.py"}},
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-3：絕對路徑寫法也擋得到")
+def _(tmp: Path):
+    result = run_guard(
+        tmp,
+        {"tool_name": "Bash", "tool_input": {"command": f"cat {tmp}/tests/hidden/test_x.py"}},
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-3 不可誤傷：範例目錄的同名路徑仍然放行")
+def _(tmp: Path):
+    # templates/examples/.../tests/hidden 不在受保護路徑內（它是刻意留著的示範，
+    # 有自己的 README 說明不受保護）。用子字串比對就會誤傷它——所以這裡是
+    # 「解析成 repo 相對路徑再判斷」，不是「字串裡有沒有 tests/hidden」。
+    result = run_guard(
+        tmp,
+        {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "ls templates/examples/demo-fizzbuzz/tests/hidden"
+            },
+        },
+    )
+    assert result.returncode == 0, f"誤傷了範例目錄：exit={result.returncode} {result.stderr}"
+
+
+@case("P0-3 不可誤傷：cd 進範例目錄之後跑它的隱藏測試仍然放行")
+def _(tmp: Path):
+    result = run_guard(
+        tmp,
+        {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "cd templates/examples/demo-fizzbuzz && "
+                           "python3 -m unittest discover -s tests/hidden -p 'test_*.py'"
+            },
+        },
+    )
+    assert result.returncode == 0, f"誤傷了範例流程：exit={result.returncode} {result.stderr}"
+
+
+@case("P0-3 不可誤傷：讀取公開測試仍然放行")
+def _(tmp: Path):
+    result = run_guard(
+        tmp, {"tool_name": "Bash", "tool_input": {"command": "cat tests/public/test_x.py"}}
+    )
+    assert result.returncode == 0, f"exit={result.returncode} stderr={result.stderr}"
 
 
 def selfcheck_in(repo: Path) -> subprocess.CompletedProcess:

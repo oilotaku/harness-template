@@ -83,7 +83,9 @@
 四層各擋不同的東西，缺一不可：
 
 1. **實體隔離**（封存）：檔案不在工作目錄裡、內容是密文 —— 這是主防線
-2. **事前攔截**（hook）：擋暫存區與封存庫路徑，讓誤觸得到明確訊息
+2. **事前攔截**（hook）：Bash 指令只要**解析得出**暫存區或封存庫路徑就擋，不分動詞
+   （`bash -c`、`find`、`xargs`、`tar`、`$(…)`、變數展開都涵蓋）；
+   完全不寫出路徑的混淆不在這一層的範圍內，那由第 1 層擋
 3. **事後稽核**（雜湊）：不依賴攔截是否成功，被改過就查得出來
 4. **自我檢查**（SessionStart）：機制壞掉時至少會有訊號，而不是默默全開
 
@@ -97,7 +99,7 @@ python3 scripts/test-guards.py && python3 scripts/test-locks.py \
   && python3 scripts/test-attempts.py
 ```
 
-這九組（共 242 個案例）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
+這九組（共 253 個案例）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
 六種組合上自動執行（見 `.github/workflows/ci.yml`）。這個 repo 特別需要 CI，
 因為機制退化是無聲的——guard 少擋一種路徑寫法、封存腳本少刪一個檔案，
 功能看起來都還正常，只有測試會發現。CI 一開就立刻抓到一個一直存在、
