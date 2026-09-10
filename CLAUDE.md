@@ -57,6 +57,10 @@
    [Orchestrator] 彙整結果、產出驗收報告 (templates/verification-report-template.md)
 ```
 
+> 驗收不通過、測試變紅、CI 掛掉、防護機制誤擋或漏擋時，一律走
+> `docs/root-cause-and-fix.md` 的步驟（先重現、先定位、先讓測試變紅，才修）。
+> 「一路試到綠燈為止」不是修正。
+
 > 需求釐清（步驟 1）與任務拆解（步驟 4）之前，Orchestrator 應先查閱既有記憶；
 > 彙整（步驟 6 之後）若有值得留給下次的判斷依據，應寫入記憶。
 > 詳細規則見 `docs/memory-management.md`（§5. 記憶管理）。
