@@ -27,6 +27,15 @@ tools: Read, Glob, Grep, Bash
 >   用它來對照哪個驗收標準對應哪個測試，不需要打開隱藏測試原始碼。
 > - 不要把權杖寫進驗收報告或任何會留下來的地方。
 
+## 推理強度（對應 frontmatter 的 `thinking: high`）
+
+frontmatter 的 `thinking` 欄位**不會被 Claude Code 讀取**，它只是本模板的文件標註
+（見 `docs/model-thinking-matrix.md`）。真正讓思考層級生效的是這一段：
+
+這是高風險的驗收任務。下結論前**逐條展開推理**：先列出所有可疑點，
+對每一點分別論證「這是作弊」與「這是合理實作」兩種可能，再做判定。
+「看起來沒問題」不是論證——說得出為什麼沒問題才是。
+
 ## 驗收步驟
 
 0. **先稽核公開測試有沒有被竄改**：執行 `python3 scripts/verify-locks.py`。

@@ -644,6 +644,89 @@ def _(tmp: Path):
 # --------------------------------------- settings.json 與腳本之間不能漂移（P2-4）
 
 
+@case("每個 agent 宣告的 thinking 層級，本文都有對應的推理強度指示（P2-3）")
+def _(tmp: Path):
+    # frontmatter 的 thinking 欄位不會被 Claude Code 讀取——它只是文件標註。
+    # 真正讓思考層級生效的是提示詞本文。兩邊漂移的話，
+    # 模板就會宣稱一個從來沒有實際效果的設定。
+    import re
+
+    agents_dir = SCRIPTS_DIR.parent / ".claude" / "agents"
+    problems = []
+    for path in sorted(agents_dir.glob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        match = re.search(r"^thinking:\s*(\w+)\s*$", text, flags=re.M)
+        if not match:
+            continue
+        level = match.group(1)
+        if level not in ("low", "medium", "high"):
+            problems.append(f"{path.name}：未知的 thinking 層級「{level}」")
+            continue
+        if "## 推理強度" not in text:
+            problems.append(f"{path.name}：宣告了 thinking: {level}，但本文沒有推理強度指示")
+            continue
+        if f"thinking: {level}" not in text.split("## 推理強度", 1)[1][:200]:
+            problems.append(f"{path.name}：推理強度段落沒有對應到 frontmatter 的 {level}")
+
+    assert not problems, "；".join(problems)
+
+
+def selfcheck_in(repo: Path) -> subprocess.CompletedProcess:
+    """在一個假 repo 裡跑 guard-selfcheck.py。
+
+    它會先確認 REPO_ROOT/scripts/guard-hidden-tests.py 存在（不存在就直接
+    回報「防護完全沒有生效」而不往下走），所以這裡把整個 scripts 目錄複製過去。
+    """
+    import shutil
+
+    target = repo / "scripts"
+    if not target.exists():
+        shutil.copytree(SCRIPTS_DIR, target)
+    return subprocess.run(
+        [sys.executable, str(target / "guard-selfcheck.py")],
+        text=True, encoding="utf-8", errors="replace", capture_output=True,
+        cwd=str(repo), env={**os.environ, "CLAUDE_PROJECT_DIR": str(repo)},
+    )
+
+
+@case("selfcheck 會抓出不在受保護路徑內的隱藏測試目錄（P1-3）")
+def _(tmp: Path):
+    # monorepo 把 packages/api/tests/hidden 當隱藏測試用時，預設設定碰不到它——
+    # 使用者會以為有保護。這個檢查就是要讓它出聲。
+    (tmp / "tests" / "hidden").mkdir(parents=True)
+    nested = tmp / "packages" / "api" / "tests" / "hidden"
+    nested.mkdir(parents=True)
+    (nested / "test_secret.py").write_text("assert True\n", encoding="utf-8")
+
+    result = selfcheck_in(tmp)
+    assert "packages/api/tests/hidden" in result.stdout, result.stdout
+
+
+@case("目錄裡的 README 寫明「不受保護」之後，selfcheck 就不再重複警告")
+def _(tmp: Path):
+    # 一個總是在響的警告等於沒有警告（P3-1 修掉的正是這種失效方式）。
+    (tmp / "tests" / "hidden").mkdir(parents=True)
+    nested = tmp / "examples" / "tests" / "hidden"
+    nested.mkdir(parents=True)
+    (nested / "test_demo.py").write_text("assert True\n", encoding="utf-8")
+    (nested / "README.md").write_text("這個目錄的隱藏測試不受保護，純示範。\n", encoding="utf-8")
+
+    result = selfcheck_in(tmp)
+    assert "examples/tests/hidden" not in result.stdout, result.stdout
+
+
+@case("repo 自己的範例隱藏測試目錄已經標註過「不受保護」")
+def _(tmp: Path):
+    example = (
+        SCRIPTS_DIR.parent / "templates" / "examples" / "demo-fizzbuzz" / "tests" / "hidden"
+    )
+    if not example.exists():
+        return
+    readme = example / "README.md"
+    assert readme.exists(), "範例的隱藏測試目錄少了說明它不受保護的 README"
+    assert "不受保護" in readme.read_text(encoding="utf-8"), readme
+
+
 @case("settings.json 的 allow 清單涵蓋每一組回歸測試（不然預設沒人會跑它）")
 def _(tmp: Path):
     # P2-5 的一個具體案例：test-guards.py 曾經是這個 repo 唯一的自動化測試，

@@ -12,6 +12,15 @@ tools: Read, Glob, Grep, Bash
 只有當 task-spec 標記 `security_review: true`（例如牽涉到使用者輸入、
 外部 API、憑證、權限、檔案系統存取）時才會被派工。
 
+## 推理強度（對應 frontmatter 的 `thinking: high`）
+
+frontmatter 的 `thinking` 欄位**不會被 Claude Code 讀取**，它只是本模板的文件標註
+（見 `docs/model-thinking-matrix.md`）。真正讓思考層級生效的是這一段：
+
+安全問題漏判一次的代價遠高於多花一輪推理。每個檢查項目都要**明確寫出**
+「攻擊者會怎麼做」與「這段程式碼為什麼擋得住／擋不住」，
+而不是回答「有做驗證」。想不出攻擊路徑時，那本身就是要回報的資訊。
+
 ## 檢查清單
 
 1. **輸入驗證**：是否對外部輸入（表單、API 參數、檔案內容）做適當驗證，

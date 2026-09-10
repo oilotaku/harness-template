@@ -76,8 +76,9 @@
 | `scripts/capacity.py` | 由 CPU/記憶體算出平行度上限、挑出沒被佔用的連接埠區間（純函式） | 被 import，不直接執行 |
 | `scripts/timing.py` / `scripts/estimate-time.py` | 執行時間預測：分類單價 + 週期開銷 + CI 重試，再用專案歷史校準 | 拆解完估時、驗收後回填實際值 |
 | `scripts/skill_policy.py` / `scripts/suggest-skills.py` | 依專案目標決定要安裝哪些 skill；強制「檢驗者拿不到會產生程式碼的 skill」 | 派工前 |
+| `scripts/attempts.py` / `scripts/show-attempts.py` | 驗收嘗試次數與停損判斷；次數由 runner 寫入，不靠 implementer 自我申報 | 驗收後、Orchestrator 決定是否再派一輪時 |
 | `scripts/scan_cache.py` | 掃描結果快取（`.harness/last-scan.json`），能力指紋不符就不給重用 | 被 import，不直接執行 |
-| `scripts/test-guards.py` / `test-locks.py` / `test-vault.py` / `test-env-guard.py` / `test-config.py` / `test-scan-json.py` / `test-timing.py` / `test-skills.py` | 上述機制各自的回歸測試 | 改動機制之後 |
+| `scripts/test-guards.py` / `test-locks.py` / `test-vault.py` / `test-env-guard.py` / `test-config.py` / `test-scan-json.py` / `test-timing.py` / `test-skills.py` / `test-attempts.py` | 上述機制各自的回歸測試 | 改動機制之後 |
 
 四層各擋不同的東西，缺一不可：
 
@@ -92,10 +93,11 @@
 python3 scripts/test-guards.py && python3 scripts/test-locks.py \
   && python3 scripts/test-vault.py && python3 scripts/test-env-guard.py \
   && python3 scripts/test-config.py && python3 scripts/test-scan-json.py \
-  && python3 scripts/test-timing.py && python3 scripts/test-skills.py
+  && python3 scripts/test-timing.py && python3 scripts/test-skills.py \
+  && python3 scripts/test-attempts.py
 ```
 
-這八組（共 218 個案例）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
+這九組（共 242 個案例）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
 六種組合上自動執行（見 `.github/workflows/ci.yml`）。這個 repo 特別需要 CI，
 因為機制退化是無聲的——guard 少擋一種路徑寫法、封存腳本少刪一個檔案，
 功能看起來都還正常，只有測試會發現。CI 一開就立刻抓到一個一直存在、

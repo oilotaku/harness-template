@@ -30,9 +30,10 @@
 | 其餘 P1-3 / P2 / P3-2 / P3-4 / P3-5 | ⬜ 未動 | 見下方各節 |
 
 已修正的項目在小節標題標上「✅ 已修正」，內文保留原本的問題描述當作紀錄。
-回歸測試：`test-guards.py`（62）、`test-locks.py`（12）、`test-vault.py`（19）、
+回歸測試：`test-guards.py`（66）、`test-locks.py`（12）、`test-vault.py`（19）、
 `test-env-guard.py`（16）、`test-config.py`（24）、`test-scan-json.py`（32）、
-`test-timing.py`（26），共 **191 案例**，
+`test-timing.py`（26）、`test-skills.py`（27）、`test-attempts.py`（20），
+共 **242 案例**，
 並由 CI 在三個平台 × 兩個 Python 版本上自動執行。
 
 ---
@@ -285,7 +286,7 @@ verifier-reviewer 無從知道它跑的公開測試還是不是原本那份。
 > 2 無法驗證（沒有清單或是舊格式，要在報告裡註記）。
 > 對應測試：`scripts/test-locks.py`（12 案例）。
 
-### P1-3. 範例目錄下的 `tests/hidden/` 完全不受保護
+### P1-3. 範例目錄下的 `tests/hidden/` 完全不受保護 ✅ 已修正
 
 `templates/examples/demo-fizzbuzz/tests/hidden/test_fizzbuzz_hidden.py` 被 commit 進 repo，
 而 guard 的路徑比對只認 **repo 根目錄下的** `tests/hidden`，
@@ -297,6 +298,22 @@ verifier-reviewer 無從知道它跑的公開測試還是不是原本那份。
 
 **建議修法**：範例 README 明確標註「本目錄的 hidden 測試僅供閱讀示範，不受 hook 保護」；
 同時把 P1-4 的「受保護路徑可設定」做出來，讓 monorepo 也能正確保護。
+
+> **實際落地**：做成**通用的偵測**，不只是替範例加一句話——原始問題是
+> 「示範了一個看起來受保護、實際不受保護的結構」，使用者照著套進 monorepo
+> （`packages/api/tests/hidden/`）時會遇到同一件事，加註解救不了那個情況。
+>
+> - `guard-selfcheck.py` 新增 `check_unprotected_hidden_dirs()`：掃出名字像
+>   隱藏測試目錄、裡面有測試檔、但**不在受保護路徑內**的位置並警告。
+>   舊的 stray 偵測只在「設定的測試目錄一個都不存在」時才跑，漏掉的正是
+>   「設定的存在、但另外還有第二個」這種情況。
+> - 承認機制：目錄裡的 README 只要寫明「不受保護」就不再警告。
+>   **修正動作與承認動作是同一件事**——把這件事寫下來給下一個讀到的人看。
+>   沒有這個開口的話，警告會在每個 session 對著刻意留著的示範目錄大喊，
+>   而一個總是在響的警告等於沒有警告（P3-1 修掉的正是這種失效方式）。
+> - 範例的 `tests/hidden/` 補上那份 README，並說明正式流程長什麼樣。
+> - 三個回歸測試：偵測得到 monorepo 巢狀路徑、README 之後就安靜、
+>   以及 repo 自己的範例目錄確實標註過。
 
 ### P1-4. 受保護路徑寫死，與「不綁定語言」的宣稱衝突 ✅ 已修正
 
@@ -385,7 +402,7 @@ verifier-reviewer 無從知道它跑的公開測試還是不是原本那份。
 > 只拿得到通過/失敗，要判斷「每條驗收標準都真的被驗到」就只剩這份表。
 > `verifier-test-writer.md` 與 `verifier-reviewer.md` 都改成指向這個範本。
 
-### P2-3. 子智能體 frontmatter 的 `thinking:` 欄位不會生效
+### P2-3. 子智能體 frontmatter 的 `thinking:` 欄位不會生效 ✅ 已修正
 
 七個 agent 定義檔都有 `thinking: high|medium`。Claude Code 的 subagent frontmatter
 認得的是 `name` / `description` / `tools` / `model`，`thinking` 會被當成未知欄位忽略。
@@ -400,6 +417,18 @@ verifier-reviewer 無從知道它跑的公開測試還是不是原本那份。
 > 對每一點分別論證「這是作弊」與「這是合理實作」兩種可能，再做判定。
 
 L1 機械型任務則相反，明講「不需要冗長推理，直接依規格產出」。
+
+> **實際落地**：七個 agent 定義檔都補上「推理強度」章節，內容依角色而不同——
+> verifier-reviewer 是「對每個可疑點分別論證『這是作弊』與『這是合理實作』」，
+> verifier-test-writer 是「想出一個只想通過測試的人會怎麼騙過這條測試，
+> 然後補一個堵住它的案例」，implementer 則相反：**明講不需要冗長推理**，
+> 只有規格有歧義時才停下來問。
+>
+> 每一段都先寫明「frontmatter 的 `thinking` 不會被讀取，真正生效的是這一段」——
+> 不解釋的話，下一個讀到的人會把它當成重複資訊刪掉。
+>
+> 另加一個回歸測試：宣告了 `thinking: X` 的 agent，本文必須有對應層級的
+> 推理強度章節。兩邊漂移會直接紅，不會再出現「宣稱了一個沒有實際效果的設定」。
 
 ### P2-4. hook matcher 靠 regex 巧合命中，不夠明確 ✅ 已修正
 
@@ -635,6 +664,25 @@ jobs:
   但**沒有任何機制記錄「失敗了幾次」**，實務上靠子智能體自己數。建議由 runner（P1-1）
   把每個 task 的執行次數寫進 `.harness/attempts.json`，讓 Orchestrator 有客觀依據，
   而不是相信 implementer 的自我申報。
+
+  > **✅ 已修正**：`scripts/attempts.py`（純函式）+ `scripts/show-attempts.py`（查詢），
+  > 由 `run-hidden-tests.py` 在每個結束分支寫入——**由執行測試的一方記錄，
+  > 不是被測的那一方**。靠自我申報的停損規則，在它最該生效的那一輪
+  > （實作者卡住、開始亂試）最不會生效。
+  >
+  > 兩個刻意的設計：紀錄檔壞掉時 `should_stop` 回 **`None`（未知）而不是
+  > `False`**（「讀不到紀錄」跟「沒有失敗過」混為一談，等於讓停損規則在檔案
+  > 壞掉時靜靜消失）；記錄失敗**不會影響驗收結果**（唯讀檔案系統不該讓一次
+  > 合法的驗收變成錯誤）。
+  >
+  > 實作過程中被自己的測試抓到一個 bug：`show-attempts.py` 原本在 `total == 0`
+  > 就早退印「尚未跑過任何一次驗收」，而紀錄檔壞掉時 `total` 也是 0——
+  > 等於把「讀不到」說成「沒失敗過」，正是這個機制最不該犯的錯。已改成先看
+  > `available`。
+  >
+  > 其餘三小項在先前幾輪已順手完成：`mkdir(parents=True)`、`verify-locks.py`
+  > 找不到清單時回 exit 2 並要求在報告註記、`service-scan.py` 的權限提示。
+  > 回歸測試 `scripts/test-attempts.py`（20 案例），含實際封存+執行的整合測試。
 
 ---
 

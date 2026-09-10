@@ -66,6 +66,9 @@ jobs:
       - name: skill 安裝決策回歸測試（檢驗者拿不到產生程式碼的 skill、設定壞掉不靜默）
         run: python scripts/test-skills.py
 
+      - name: 驗收嘗試次數回歸測試（停損靠 runner 記錄，不靠自我申報）
+        run: python scripts/test-attempts.py
+
       - name: 在非 UTF-8 locale 下重跑（Linux 就能抓到編碼 bug，不用等 Windows）
         if: runner.os == 'Linux'
         env:
@@ -81,6 +84,7 @@ jobs:
           python -X utf8=0 scripts/test-scan-json.py
           python -X utf8=0 scripts/test-timing.py
           python -X utf8=0 scripts/test-skills.py
+          python -X utf8=0 scripts/test-attempts.py
 
       - name: 範例流程仍可重跑
         working-directory: templates/examples/demo-fizzbuzz

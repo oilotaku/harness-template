@@ -24,7 +24,9 @@
       "Bash(python3 scripts/test-scan-json.py)",
       "Bash(python3 scripts/test-timing.py)",
       "Bash(python3 scripts/suggest-skills.py:*)",
-      "Bash(python3 scripts/test-skills.py)"
+      "Bash(python3 scripts/test-skills.py)",
+      "Bash(python3 scripts/show-attempts.py:*)",
+      "Bash(python3 scripts/test-attempts.py)"
     ],
     "deny": [
       "Bash(rm -rf *)",
