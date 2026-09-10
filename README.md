@@ -1,5 +1,7 @@
 # Harness 工程模板
 
+[![CI](https://github.com/oilotaku/harness-template/actions/workflows/ci.yml/badge.svg)](https://github.com/oilotaku/harness-template/actions/workflows/ci.yml)
+
 一個給 Claude Code（或任何支援 sub-agent 的 AI 開發流程）使用的**基本開發框架**，
 用來把「一個模糊的需求」變成「多個可平行執行、互相制衡的子任務」。
 
@@ -61,6 +63,14 @@
 ```bash
 python3 scripts/test-guards.py && python3 scripts/test-locks.py && python3 scripts/test-vault.py
 ```
+
+這三組（共 83 個案例）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
+六種組合上自動執行（見 `.github/workflows/ci.yml`）。這個 repo 特別需要 CI，
+因為機制退化是無聲的——guard 少擋一種路徑寫法、封存腳本少刪一個檔案，
+功能看起來都還正常，只有測試會發現。
+
+支援的 Python 版本：**3.9 以上**，且不需要任何第三方套件
+（`psutil` 是選用的，裝了會讓服務掃描更準確）。
 
 ## 設計依據
 

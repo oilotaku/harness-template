@@ -94,6 +94,7 @@ harness-template/
 │   ├── agents/                   ← 子智能體定義（實作者 / 檢驗者）
 │   ├── commands/                 ← 斜線指令
 │   └── settings.json             ← 權限與 hook 設定範例
+├── .github/workflows/ci.yml      ← CI：三平台 × 兩個 Python 版本跑全部回歸測試
 ├── scripts/                      ← 機器效能 / 服務掃描 / 環境守門腳本
 │                                    + 防作弊機制本體（封存、鎖定、稽核、hook）
 ├── tests/

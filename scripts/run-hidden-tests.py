@@ -133,11 +133,16 @@ def main() -> int:
             )
             return 2
 
-        # 路徑一律用正斜線再帶進指令：Windows 的反斜線會被 shlex.split 當成
-        # 跳脫字元吃掉，而 Python 與絕大多數工具在 Windows 上都吃正斜線。
-        command = info["test_command"].format(
-            dir=str(workdir).replace("\\", "/"), repo=str(root).replace("\\", "/")
-        )
+        # 先把指令範本斷詞，再逐一代換 placeholder——順序反過來的話，
+        # 路徑裡只要有空白（Windows 的 C:\\Program Files\\...）就會被 shlex 拆成兩個參數，
+        # 反斜線也會被當成跳脫字元吃掉。範本本身不含空白路徑，所以先斷詞是安全的。
+        substitutions = {
+            "dir": str(workdir),
+            "repo": str(root),
+            "python": sys.executable,
+        }
+        argv = [token.format(**substitutions) for token in shlex.split(info["test_command"])]
+        command = " ".join(argv)
         env = {
             **os.environ,
             "PYTHONPATH": os.pathsep.join(
@@ -153,7 +158,7 @@ def main() -> int:
         print("（工作目錄為 repo 根目錄，解密後的暫存目錄在測試結束後會立刻刪除）")
         print("-" * 60)
 
-        result = subprocess.run(shlex.split(command), cwd=str(root), env=env)
+        result = subprocess.run(argv, cwd=str(root), env=env)
 
         print("-" * 60)
         if result.returncode == 0:

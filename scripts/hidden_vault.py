@@ -44,7 +44,9 @@ from pathlib import Path
 MANIFEST_VERSION = 1
 KEYSTREAM_INFO = b"harness-hidden-tests-v1"
 
-DEFAULT_TEST_COMMAND = "python3 -m unittest discover -s {dir} -p 'test_*.py' -v"
+# {python} 會被換成執行 runner 的直譯器本身（sys.executable）。不寫死 python3 是因為
+# Windows 上常常只有 python.exe；而且用同一個直譯器，測試環境才跟 runner 一致。
+DEFAULT_TEST_COMMAND = "{python} -m unittest discover -s {dir} -p 'test_*.py' -v"
 
 
 # --------------------------------------------------------------------- 路徑

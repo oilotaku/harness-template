@@ -19,11 +19,13 @@
 | P0-2 全 repo 搜尋撈到隱藏測試 | ✅ 由 P1-1 消解 | 檔案已不在工作目錄裡，搜尋範圍內根本沒有它 |
 | P0-4 把隱藏測試當 oracle 執行 | ✅ 由 P1-1 消解 | 解密需要權杖，implementer 的上下文裡沒有 |
 | P0-3 Bash 包裝繞過 | 🟡 降級 | `tests/hidden/`（暫存區）仍可能被繞過；但封存後那裡是空的，封存庫拿到的是密文 |
+| P3-3 沒有 CI | ✅ 已修正 | 新增 `.github/workflows/ci.yml`：3 平台 × 2 個 Python 版本跑全部回歸測試 |
 | 其餘 P1-3 / P1-4 / P2 / P3 | ⬜ 未動 | 見下方各節 |
 
 已修正的項目在小節標題標上「✅ 已修正」，內文保留原本的問題描述當作紀錄。
-回歸測試：`python3 scripts/test-guards.py`（50 案例）、
-`python3 scripts/test-locks.py`（12 案例）、`python3 scripts/test-vault.py`（19 案例）。
+回歸測試：`python3 scripts/test-guards.py`（52 案例）、
+`python3 scripts/test-locks.py`（12 案例）、`python3 scripts/test-vault.py`（19 案例），
+共 83 案例，並由 CI 在三個平台 × 兩個 Python 版本上自動執行。
 
 ---
 
@@ -420,7 +422,7 @@ L1 機械型任務則相反，明講「不需要冗長推理，直接依規格�
 Orchestrator 直接讀欄位，不用解析中文；順便寫一份 `.harness/last-scan.json` 當快取，
 避免黃金法則第 5 條「每個任務前都要掃描」在多 task 專案裡重複跑 N 次。
 
-### P3-3. 沒有 CI
+### P3-3. 沒有 CI ✅ 已修正
 
 `scripts/test-guards.py` 寫得很完整（30 個案例、涵蓋歷史繞過手法），
 但**沒有任何自動化在跑它**。這對一個「防作弊機制」的 repo 特別危險：
@@ -448,6 +450,26 @@ jobs:
 
 三支掃描腳本都宣稱「Win/Linux/Mac 通用」，但目前沒有任何一次實際在 Windows 上被跑過；
 若要維持這個宣稱，`runs-on` 應再開 `windows-latest` / `macos-latest`。
+
+> **實際落地**：已新增 `.github/workflows/ci.yml`，比上面的草稿再往前一步：
+>
+> - **開了 OS matrix**（ubuntu / windows / macos）。既然文件宣稱三平台通用，
+>   就該真的跑過，否則那句宣稱只是願望。`defaults.run.shell: bash` 讓三個平台
+>   共用同一組指令（Windows runner 內建 Git Bash）。
+> - **Python 版本取 3.9 與 3.13 兩個邊界**；3.10–3.12 已在本地逐版驗證過。
+> - **`fail-fast: false`**：一個組合壞掉時其他組合仍要跑完，才看得出來是單一平台
+>   的問題還是全面性的問題。
+> - 除了三組回歸測試，另外跑 `init.py` 與 `guard-selfcheck.py` 的 smoke，
+>   以及範例流程的重跑。
+>
+> 為了讓 CI 能在 Windows 上跑，順手修掉一個真正的可攜性 bug：隱藏測試的預設
+> 執行指令原本寫死 `python3`，而 Windows 上常常只有 `python.exe`。現在改成
+> `{python}` placeholder（代換成 `sys.executable`），而且是**先斷詞再代換**——
+> 反過來的話，路徑裡只要有空白（`C:\Program Files\...`）就會被 `shlex` 拆成兩個參數。
+>
+> 同一輪也補上兩個「設定與程式碼漂移」的測試案例（P2-4 的後續）：
+> matcher 是否涵蓋 guard 實際處理的每一種工具、hook 指令是否都用了
+> `$CLAUDE_PROJECT_DIR` 絕對路徑。
 
 ### P3-4. `.claude/settings.json` 的 deny 規則說服力不足
 
@@ -553,5 +575,6 @@ for name, payload in PROBES:
 - P0-2 / P0-3 / P0-4 的案例：**仍然放行**，屬預期範圍（尚未實作）
 - 反向對照（讀 `README.md`、讀已鎖定的公開測試、讀 repo 之外的路徑）：正確放行 ✅
 
-這批案例已經整批移進 `scripts/test-guards.py`（目前 42 案例）與
-`scripts/test-locks.py`（12 案例），改動機制後直接跑這兩支即可。
+這批案例已經整批移進 `scripts/test-guards.py`（目前 52 案例）、
+`scripts/test-locks.py`（12 案例）與 `scripts/test-vault.py`（19 案例），
+改動機制後直接跑這三支即可（CI 也會跑）。

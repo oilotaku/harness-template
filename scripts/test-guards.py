@@ -23,7 +23,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-GUARD_SCRIPT = Path(__file__).resolve().parent / "guard-hidden-tests.py"
+SCRIPTS_DIR = Path(__file__).resolve().parent
+GUARD_SCRIPT = SCRIPTS_DIR / "guard-hidden-tests.py"
 
 CASES = []
 
@@ -588,6 +589,53 @@ def _(tmp: Path):
         tmp, {"tool_name": "Read", "tool_input": {"file_path": str(tmp.parent / "unrelated/x.py")}}
     )
     assert result.returncode == 0, f"exit={result.returncode} stderr={result.stderr}"
+
+
+# --------------------------------------- settings.json 與腳本之間不能漂移（P2-4）
+
+
+@case("settings.json 的 PreToolUse matcher 涵蓋 guard 實際處理的每一種工具")
+def _(tmp: Path):
+    # 舊的 matcher 是 "Edit|Write|Bash|Read|Grep|Glob"，能擋到 MultiEdit/NotebookEdit
+    # 純粹是因為名稱剛好含有 "Edit"。這個案例確保兩邊不會再漂移——
+    # 有人在 guard 新增一種工具、卻忘了改 matcher 時，這裡會紅。
+    import re
+
+    settings = json.loads(
+        (SCRIPTS_DIR.parent / ".claude" / "settings.json").read_text(encoding="utf-8")
+    )
+    matchers = [
+        entry.get("matcher", "")
+        for entry in settings["hooks"]["PreToolUse"]
+        if any(
+            "guard-hidden-tests.py" in hook.get("command", "")
+            for hook in entry.get("hooks", [])
+        )
+    ]
+    assert matchers, "settings.json 裡找不到掛 guard-hidden-tests.py 的 PreToolUse hook"
+
+    covered = "|".join(matchers)
+    expected = ["Bash", "Edit", "MultiEdit", "Write", "NotebookEdit", "Read", "Grep", "Glob"]
+    missing = [tool for tool in expected if not re.search(covered, tool)]
+    assert not missing, f"matcher 沒涵蓋到這些工具：{missing}（目前 matcher：{covered}）"
+
+
+@case("settings.json 的 hook 指令用 $CLAUDE_PROJECT_DIR 絕對路徑（P0-5）")
+def _(tmp: Path):
+    settings = json.loads(
+        (SCRIPTS_DIR.parent / ".claude" / "settings.json").read_text(encoding="utf-8")
+    )
+    commands = [
+        hook.get("command", "")
+        for event in settings["hooks"].values()
+        for entry in event
+        for hook in entry.get("hooks", [])
+    ]
+    assert commands, "settings.json 裡沒有任何 hook 指令"
+    for command in commands:
+        assert "$CLAUDE_PROJECT_DIR" in command, (
+            f"hook 指令用了相對路徑：{command}——工作目錄不是 repo 根時會靜默失效"
+        )
 
 
 def main() -> int:
