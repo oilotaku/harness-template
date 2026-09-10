@@ -107,7 +107,7 @@ harness-template/
 └── templates/                    ← task-spec 與驗收報告範本（含 examples/ 範例）
 ```
 
-> `.harness/`（環境指紋、鎖定清單、隱藏測試 manifest）與封存庫（repo 之外）
+> `.harness/`（環境指紋、鎖定清單、隱藏測試 manifest、進度檢查點）與封存庫（repo 之外）
 > 都不會進版控，前者已在 `.gitignore`，後者根本不在 repo 裡。
 
 ---
@@ -125,9 +125,14 @@ harness-template/
 2. **模型先小後大**：低風險任務先用中小模型跑第一輪驗收，出現可疑訊號才升級；
    L3/L4 不適用。
 3. **`CLAUDE.md` 只寫規則與指向**：它的乘數最高，細節一律放 `docs/`。
+4. **訂閱制方案（例如 Pro）要多顧一件事：消耗速率**。撞到用量上限的代價是複利的
+   （等待 → session 斷掉 → 重載固定開銷 → 更快撞下一次），所以在這類方案下
+   **預設序列執行**（`machine-profile.py` 給的是機器容量上限，不是建議值），
+   每個 task 做完就 commit，並把跨 session 需要的進度寫進
+   `.harness/progress/<task_id>.md`，讓恢復成本是「讀一個小檔案」。
 
-完整的量測數據、不該省的清單、以及「平行度不省 token」這個常見誤解，
-見 `docs/token-strategy.md`。
+完整的量測數據、訂閱制下的速率與可恢復性策略、不該省的清單、
+以及「平行度不省 token」這個常見誤解，見 `docs/token-strategy.md`。
 
 ---
 

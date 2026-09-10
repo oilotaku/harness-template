@@ -30,8 +30,8 @@
 | 其餘 P1-3 / P2 / P3-2 / P3-4 / P3-5 | ⬜ 未動 | 見下方各節 |
 
 已修正的項目在小節標題標上「✅ 已修正」，內文保留原本的問題描述當作紀錄。
-回歸測試：`test-guards.py`（55）、`test-locks.py`（12）、`test-vault.py`（19）、
-`test-env-guard.py`（16）、`test-config.py`（24），共 **126 案例**，
+回歸測試：`test-guards.py`（59）、`test-locks.py`（12）、`test-vault.py`（19）、
+`test-env-guard.py`（16）、`test-config.py`（24），共 **130 案例**，
 並由 CI 在三個平台 × 兩個 Python 版本上自動執行。
 
 ---

@@ -24,7 +24,10 @@ tools: Read, Write, Edit, Glob, Grep, Bash, Agent
      `docs/memory-management.md` §3 判斷是否該寫入記憶。
 
 2. **環境掃描**（呼叫 `scripts/machine-profile.py` 與 `scripts/service-scan.py`）
-   - 讀出 CPU 核心數、可用記憶體、是否有 GPU，決定「同時可以派出幾個子智能體」。
+   - 讀出 CPU 核心數、可用記憶體、是否有 GPU，算出「同時**最多**可以派出幾個子智能體」。
+     那是機器容量的上限，**不是建議值**：在訂閱制方案（例如 Claude Pro）下卡住你的是
+     用量視窗，平行度會等倍放大消耗速率，所以**預設序列執行**，
+     要開平行必須有明確理由（見 `docs/token-strategy.md` §3.4）。
    - 讀出已佔用的連接埠與已在跑的服務（資料庫、快取、其他 dev server），
      規劃新任務時**主動避開**這些埠號與服務，不得覆蓋或關閉既有服務。
 
@@ -60,7 +63,14 @@ tools: Read, Write, Edit, Glob, Grep, Bash, Agent
      舊的立即失效，記得替換。
    - 權杖遺失沒有救援路徑，只能請 `verifier-test-writer` 重寫並重新封存。
 
-7. **彙整**
+7. **進度檢查點**（每次 task 狀態改變時）
+   - 維護 `.harness/progress/<task_id>.md`：狀態、目前在哪一步、已完成/未完成、
+     已知決策、下一步。幾百字元就好，格式見 `docs/token-strategy.md` §3.2。
+   - 目的是「被打斷後重開 session 時，讀一個小檔案就能接上」，
+     而不是重讀整個 repo 重建脈絡。**禁止把執行權杖寫進去。**
+   - 每個 task 驗收完就 commit，讓一次中斷最多只損失一個 task 的進度。
+
+8. **彙整**
    - 收集所有 `templates/verification-report-template.md`，
      產出整體專案的完成度報告給使用者，繁體中文撰寫。
    - 若有 task 被 implementer 標記 `blocked`，或 verifier 回報反覆出現的
@@ -73,8 +83,8 @@ tools: Read, Write, Edit, Glob, Grep, Bash, Agent
 - 禁止在檢驗者尚未完成測試前，就把任務交給實作者。
 - 禁止在未完成環境掃描前，決定平行子智能體數量。
 - 禁止忽略 `env-guard.py` 的警告訊息直接繼續執行。
-- 禁止把 `.harness/` 底下的內容（環境指紋、鎖定測試清單、隱藏測試 manifest）
-  重複寫進記憶——兩者性質不同，見 `docs/memory-management.md` §1。
+- 禁止把 `.harness/` 底下的內容（環境指紋、鎖定測試清單、隱藏測試 manifest、
+  進度檢查點）重複寫進記憶——兩者性質不同，見 `docs/memory-management.md` §1。
 - **禁止把隱藏測試的執行權杖寫進記憶**。記憶是跨 session 持久保存的，
   權杖是單次任務的一次性秘密，寫進去等於讓它無限期外流。
 - 禁止在隱藏測試尚未封存（`seal-hidden-tests.py` 尚未執行）前就派工給 implementer。

@@ -52,7 +52,7 @@
 | `scripts/run-hidden-tests.py` | 隱藏測試的**唯一執行入口**，需要權杖才解得開 | verifier-reviewer 驗收時 |
 | `scripts/hidden_vault.py` | 上面兩支共用的封存庫邏輯（加密、manifest、路徑規則） | 被 import，不直接執行 |
 | `scripts/harness_config.py` | 讀 `harness.config.json`：這個專案的測試路徑慣例（非 Python 專案一定要設） | 被 import，不直接執行 |
-| `scripts/guard-hidden-tests.py` | **事前攔截**：PreToolUse hook，擋下對 `tests/hidden/`（暫存區）、封存庫路徑、`.harness/` 與已鎖定公開測試的存取 | 每次工具呼叫（由 `.claude/settings.json` 掛上） |
+| `scripts/guard-hidden-tests.py` | **事前攔截**：PreToolUse hook，擋下對 `tests/hidden/`（暫存區）、封存庫路徑、`.harness/`（`progress/` 除外）與已鎖定公開測試的存取 | 每次工具呼叫（由 `.claude/settings.json` 掛上） |
 | `scripts/lock-tests.py` | 把 `tests/public/` 的**路徑 + sha256** 寫進 `.harness/locked-tests.list` | verifier-test-writer 寫完公開測試後 |
 | `scripts/verify-locks.py` | **事後稽核**：重算雜湊比對，抓出「事前攔截被繞過」的竄改 | verifier-reviewer 驗收的第一步 |
 | `scripts/guard-selfcheck.py` | **自我檢查**：用已知該被擋的 payload 實跑一次，確認防護這次真的生效 | SessionStart hook |
@@ -73,7 +73,7 @@ python3 scripts/test-guards.py && python3 scripts/test-locks.py \
   && python3 scripts/test-config.py
 ```
 
-這五組（共 126 個案例）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
+這五組（共 130 個案例）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
 六種組合上自動執行（見 `.github/workflows/ci.yml`）。這個 repo 特別需要 CI，
 因為機制退化是無聲的——guard 少擋一種路徑寫法、封存腳本少刪一個檔案，
 功能看起來都還正常，只有測試會發現。CI 一開就立刻抓到一個一直存在、
@@ -96,8 +96,14 @@ session 各自重載 `CLAUDE.md` 與自己的定義檔。那是「獨立驗證�
 得自己搜尋程式碼，那是最不可控的成本）、**低風險任務的驗收先小後大**、
 **`CLAUDE.md` 只寫規則與指向**（它的乘數最高）。
 
-量測數據、不該省的清單、以及「平行度不省 token」這個常見誤解，
-見 `docs/token-strategy.md`。
+訂閱制方案（例如 Pro）還要多顧一件事：**卡住你的是消耗速率，不是花費**。
+撞到用量上限的代價是複利的——等待、session 斷掉、重載一次固定開銷、
+然後更快撞到下一次。所以那類方案下預設**序列執行**、每個 task 做完就 commit、
+把進度寫進 `.harness/progress/<task_id>.md`，讓被打斷之後的恢復成本
+是「讀一個小檔案」而不是「重建整段推理」。
+
+量測數據、訂閱制下的完整策略、不該省的清單、以及「平行度不省 token」
+這個常見誤解，見 `docs/token-strategy.md`。
 
 ## 設計依據
 
