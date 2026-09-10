@@ -3,20 +3,26 @@
   "permissions": {
     "allow": [
       "Bash(python3 scripts/init.py)",
+      "Bash(python3 scripts/init.py:*)",
       "Bash(python3 scripts/machine-profile.py)",
+      "Bash(python3 scripts/machine-profile.py:*)",
       "Bash(python3 scripts/service-scan.py)",
+      "Bash(python3 scripts/service-scan.py:*)",
       "Bash(python3 scripts/env-guard.py)",
+      "Bash(python3 scripts/env-guard.py:*)",
       "Bash(python3 scripts/lock-tests.py)",
       "Bash(python3 scripts/verify-locks.py)",
       "Bash(python3 scripts/guard-selfcheck.py)",
-      "Bash(python3 scripts/test-guards.py)",
-      "Bash(python3 scripts/test-locks.py)",
       "Bash(python3 scripts/seal-hidden-tests.py:*)",
       "Bash(python3 scripts/run-hidden-tests.py:*)",
+      "Bash(python3 scripts/estimate-time.py:*)",
+      "Bash(python3 scripts/test-guards.py)",
+      "Bash(python3 scripts/test-locks.py)",
       "Bash(python3 scripts/test-vault.py)",
-      "Bash(python3 scripts/env-guard.py:*)",
       "Bash(python3 scripts/test-env-guard.py)",
-      "Bash(python3 scripts/test-config.py)"
+      "Bash(python3 scripts/test-config.py)",
+      "Bash(python3 scripts/test-scan-json.py)",
+      "Bash(python3 scripts/test-timing.py)"
     ],
     "deny": [
       "Bash(rm -rf *)",

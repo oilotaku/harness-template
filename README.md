@@ -43,10 +43,23 @@
 |---|---|
 | `CLAUDE.md` | 全域規則（黃金法則、工作流程總覽） |
 | `.claude/agents/` | 子智能體定義（實作者 3 個、檢驗者 3 個） |
-| `.claude/commands/` | `/task-plan` `/task-dispatch` `/machine-check` 斜線指令 |
+| `.claude/commands/` | `/task-plan` `/task-dispatch` `/machine-check` 斜線指令（用法見下） |
 | `scripts/` | `init.py`（一鍵初始化）+ 機器效能、既有服務、環境指紋掃描腳本；防作弊機制本體（見下表） |
 | `docs/` | 任務拆解、模型/思考分配、實作/檢驗分離、多語言支援、記憶管理、token 成本策略、根因分析與修正流程、**執行時間預測** |
-| `templates/` | task-spec 與驗收報告範本 |
+| `templates/` | task-spec、驗收報告、驗收標準對照表範本 |
+| `reports/` | 驗收報告落檔處（檢驗者沒有 `Write` 工具，由 Orchestrator 落檔） |
+
+### 三個斜線指令的使用時機
+
+| 指令 | 什麼時候用 | 會做什麼 |
+|---|---|---|
+| `/task-plan` | **還沒有計畫時**——手上只有一句需求 | 釐清 → 掃描 → 拆解 → 指派模型與估時，產出待核准的計畫 |
+| `/task-dispatch` | **計畫已經核准之後** | 依計畫派工：檢驗者先寫測試並封存，實作者才開始 |
+| `/machine-check` | 只想看機器狀態，不想觸發拆解 | 單獨跑機器效能、既有服務、環境指紋三項掃描 |
+
+順序是固定的：`/task-plan` 的產出是 `/task-dispatch` 的輸入。跳過前者直接派工，
+等於讓實作者拿著一份沒有範圍邊界的規格開工——那是全流程最貴的失敗方式
+（見 `docs/token-strategy.md` §2.1）。
 
 ## 防作弊機制的組成
 
@@ -81,7 +94,7 @@ python3 scripts/test-guards.py && python3 scripts/test-locks.py \
   && python3 scripts/test-timing.py
 ```
 
-這七組（共 188 個案例）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
+這七組（共 191 個案例）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
 六種組合上自動執行（見 `.github/workflows/ci.yml`）。這個 repo 特別需要 CI，
 因為機制退化是無聲的——guard 少擋一種路徑寫法、封存腳本少刪一個檔案，
 功能看起來都還正常，只有測試會發現。CI 一開就立刻抓到一個一直存在、

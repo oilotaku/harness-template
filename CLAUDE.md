@@ -62,8 +62,10 @@
 > `docs/root-cause-and-fix.md` 的步驟（先重現、先定位、先讓測試變紅，才修）。
 > 「一路試到綠燈為止」不是修正。
 
-> 需求釐清（步驟 1）與任務拆解（步驟 4）之前，Orchestrator 應先查閱既有記憶；
-> 彙整（步驟 6 之後）若有值得留給下次的判斷依據，應寫入記憶。
+> 需求釐清與任務拆解之前，Orchestrator 應先查閱既有記憶；
+> 派工結束、彙整驗收結果時，若有值得留給下次的判斷依據，應寫入記憶。
+> （這裡刻意不寫 `orchestrator.md` 的步驟編號——那份清單會增修，
+> 寫死編號只會讓兩邊悄悄對不上。）
 > 詳細規則見 `docs/memory-management.md`（§5. 記憶管理）。
 
 ---
@@ -108,8 +110,9 @@ harness-template/
 ├── tests/                        ← 預設的測試位置，可由 harness.config.json 覆寫
 │   ├── public/                   ← 公開測試（交給實作者，鎖定後不可修改）
 │   └── hidden/                   ← 隱藏測試的**暫存區**；封存後這裡是空的
-├── docs/                         ← 方法論文件（含 token-strategy.md：成本策略）
-└── templates/                    ← task-spec 與驗收報告範本（含 examples/ 範例）
+├── docs/                         ← 方法論文件（拆解、模型指派、成本、根因分析、估時…）
+├── reports/                      ← 驗收報告落檔處；檢驗者寫不了檔案，由 Orchestrator 落檔
+└── templates/                    ← task-spec / 驗收報告 / 驗收標準對照表範本（含 examples/）
 ```
 
 > `.harness/`（環境指紋、鎖定清單、隱藏測試 manifest、進度檢查點、掃描快取、估時紀錄）與封存庫（repo 之外）

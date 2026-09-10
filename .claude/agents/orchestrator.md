@@ -90,8 +90,9 @@ tools: Read, Write, Edit, Glob, Grep, Bash, Agent
    - 每個 task 驗收完就 commit，讓一次中斷最多只損失一個 task 的進度。
 
 9. **彙整**
-   - 收集所有 `templates/verification-report-template.md`，
-     產出整體專案的完成度報告給使用者，繁體中文撰寫。
+   - **落檔驗收報告**：檢驗者沒有 `Write` 工具（刻意的），報告是寫在它們的
+     回覆裡交回來的。由你落檔到 `reports/<task_id>-verification.md`，
+     再彙整成整體專案的完成度報告給使用者，繁體中文撰寫。
    - **回填實際耗時**：`python3 scripts/estimate-time.py --record <task_id>
      --estimated <當初估的> --actual <實際的>`。不回填的話校準係數永遠是 1.0，
      等於一直用別的專案的單價在估這個專案（見 `docs/time-estimation.md` §4）。

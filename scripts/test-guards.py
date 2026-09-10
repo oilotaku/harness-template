@@ -644,6 +644,45 @@ def _(tmp: Path):
 # --------------------------------------- settings.json 與腳本之間不能漂移（P2-4）
 
 
+@case("settings.json 的 allow 清單涵蓋每一組回歸測試（不然預設沒人會跑它）")
+def _(tmp: Path):
+    # P2-5 的一個具體案例：test-guards.py 曾經是這個 repo 唯一的自動化測試，
+    # 卻沒被寫進 allow 清單也沒寫進 README——等於預設沒人會跑它。
+    # 新增一組測試卻忘了同步的話，這裡會紅。
+    settings = json.loads(
+        (SCRIPTS_DIR.parent / ".claude" / "settings.json").read_text(encoding="utf-8")
+    )
+    allow = "\n".join(settings["permissions"]["allow"])
+    missing = [
+        path.name
+        for path in sorted(SCRIPTS_DIR.glob("test-*.py"))
+        if path.name not in allow
+    ]
+    assert not missing, f"settings.json 的 allow 清單少了：{missing}"
+
+
+@case("README 的回歸測試指令涵蓋每一組測試")
+def _(tmp: Path):
+    readme = (SCRIPTS_DIR.parent / "README.md").read_text(encoding="utf-8")
+    missing = [
+        path.name
+        for path in sorted(SCRIPTS_DIR.glob("test-*.py"))
+        if path.name not in readme
+    ]
+    assert not missing, f"README.md 沒提到：{missing}（等於預設沒人會跑它）"
+
+
+@case("CI 會跑每一組回歸測試")
+def _(tmp: Path):
+    workflow = (SCRIPTS_DIR.parent / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    missing = [
+        path.name
+        for path in sorted(SCRIPTS_DIR.glob("test-*.py"))
+        if path.name not in workflow
+    ]
+    assert not missing, f"ci.yml 沒跑：{missing}（機制退化是無聲的，沒進 CI 等於沒有保護）"
+
+
 @case("settings.json 的 PreToolUse matcher 涵蓋 guard 實際處理的每一種工具")
 def _(tmp: Path):
     # 舊的 matcher 是 "Edit|Write|Bash|Read|Grep|Glob"，能擋到 MultiEdit/NotebookEdit
