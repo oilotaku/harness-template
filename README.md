@@ -220,3 +220,5 @@ session 各自重載 `CLAUDE.md` 與自己的定義檔。那是「獨立驗證�
 記錄了每一項的問題、修法、以及**實際落地時偏離原始草案的地方與理由**。
 它只給人看——那份文件比其他所有 `docs/` 加起來還大，不要放進任何子智能體的
 閱讀路徑（見 `docs/token-strategy.md` §1）。
+第二輪審視 `docs/improvement-suggestions-round2.md`（同樣只給人看）針對第一輪
+引入的新信任根——manifest、鎖定清單、keystream——做了實測，並列出尚未處理的項目。
