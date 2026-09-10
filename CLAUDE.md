@@ -12,6 +12,9 @@
 ## 0. 黃金法則（不可違反）
 
 1. **實作者絕不能修改或看到「隱藏驗收測試」**，只能看到任務規格 (task-spec) 與公開測試。
+   這條規則不是靠自律，而是靠機制落實：隱藏測試寫完後會被**加密封存到 repo 之外**
+   （`scripts/seal-hidden-tests.py`），解密執行需要只交給檢驗者的權杖。
+   細節見 `docs/implementer-verifier-workflow.md`。
 2. **檢驗者必須先寫測試，才可以讓實作者開始實作**（防止先射箭再畫靶）。
 3. **實作者與檢驗者是不同的子智能體 session，禁止共用上下文**，避免互相污染判斷。
 4. **實作者嚴禁超出任務規格範圍發揮**（禁止幻覺出未要求的功能、禁止「順手重構」不相關程式碼）。
@@ -39,12 +42,14 @@
           │
           ▼
    [檢驗者 verifier-test-writer]  ──先──►  依 task-spec 撰寫測試（含隱藏測試）
-          │
+          │                                   → 鎖定公開測試、封存隱藏測試
+          │                                   → 交回一次性「執行權杖」
           ▼
    [實作者 implementer-*]        ──後──►  只依 task-spec + 公開測試實作
           │
           ▼
-   [檢驗者 verifier-reviewer]     ──驗收──►  比對隱藏測試 + 檢查作弊模式
+   [檢驗者 verifier-reviewer]     ──驗收──►  稽核鎖定 + 用權杖執行隱藏測試
+          │                                   + 檢查作弊模式
           │
           ▼
    [Orchestrator] 彙整結果、產出驗收報告 (templates/verification-report-template.md)
@@ -89,10 +94,19 @@ harness-template/
 │   ├── agents/                   ← 子智能體定義（實作者 / 檢驗者）
 │   ├── commands/                 ← 斜線指令
 │   └── settings.json             ← 權限與 hook 設定範例
+├── harness.config.json           ← （選用）專案自己的測試路徑慣例；非 Python 專案要設
+├── .github/workflows/ci.yml      ← CI：三平台 × 兩個 Python 版本跑全部回歸測試
 ├── scripts/                      ← 機器效能 / 服務掃描 / 環境守門腳本
+│                                    + 防作弊機制本體（封存、鎖定、稽核、hook）
+├── tests/                        ← 預設的測試位置，可由 harness.config.json 覆寫
+│   ├── public/                   ← 公開測試（交給實作者，鎖定後不可修改）
+│   └── hidden/                   ← 隱藏測試的**暫存區**；封存後這裡是空的
 ├── docs/                         ← 方法論文件
-└── templates/                    ← task-spec 與驗收報告範本
+└── templates/                    ← task-spec 與驗收報告範本（含 examples/ 範例）
 ```
+
+> `.harness/`（環境指紋、鎖定清單、隱藏測試 manifest）與封存庫（repo 之外）
+> 都不會進版控，前者已在 `.gitignore`，後者根本不在 repo 裡。
 
 ---
 

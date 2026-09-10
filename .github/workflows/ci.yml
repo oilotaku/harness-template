@@ -1,0 +1,100 @@
+# 對應 docs/improvement-suggestions.md 的 P3-3。
+#
+# 為什麼這個 repo 特別需要 CI：它的主要內容就是一套「防作弊機制」，而機制退化
+# 是無聲的——guard 少擋一種路徑寫法、封存腳本少刪一個檔案，功能看起來都還正常，
+# 只有測試會發現。P0-1 那批繞過就是在沒有 CI 的情況下，累積了整整一輪 review
+# 才被抓出來的。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    # Windows runner 預設是 PowerShell，引號規則跟 bash 不同。統一用 bash
+    # （GitHub 的 Windows runner 內建 Git Bash），指令才不用寫兩套。
+    shell: bash
+
+jobs:
+  guards:
+    name: 防作弊機制回歸測試 (${{ matrix.os }} / py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # 一個組合失敗時，其他組合仍要跑完——不然只會看到「最早壞的那一個」，
+      # 看不出來是單一平台的問題還是全面性的問題。
+      fail-fast: false
+      matrix:
+        # 三支掃描腳本與 hook 都宣稱 Win/Linux/Mac 通用，這裡就要真的跑過，
+        # 否則那句宣稱只是願望。
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        # 取支援範圍的下界與上界；中間版本本地已驗證過。
+        python-version: ["3.9", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: guard hook 回歸測試（含歷史繞過手法與 settings.json 漂移檢查）
+        run: python scripts/test-guards.py
+
+      - name: 公開測試鎖定與事後稽核回歸測試
+        run: python scripts/test-locks.py
+
+      - name: 隱藏測試封存庫回歸測試（加密隔離與執行權杖）
+        run: python scripts/test-vault.py
+
+      - name: 環境指紋回歸測試（該擋的要擋、不該吵的不能吵）
+        run: python scripts/test-env-guard.py
+
+      - name: 專案測試路徑設定回歸測試（設定有效 + 設定錯誤不靜默）
+        run: python scripts/test-config.py
+
+      - name: 在非 UTF-8 locale 下重跑（Linux 就能抓到編碼 bug，不用等 Windows）
+        if: runner.os == 'Linux'
+        env:
+          LC_ALL: C
+          LANG: C
+          PYTHONIOENCODING: cp1252
+        run: |
+          python -X utf8=0 scripts/test-guards.py
+          python -X utf8=0 scripts/test-locks.py
+          python -X utf8=0 scripts/test-vault.py
+          python -X utf8=0 scripts/test-env-guard.py
+          python -X utf8=0 scripts/test-config.py
+
+      - name: 範例流程仍可重跑
+        working-directory: templates/examples/demo-fizzbuzz
+        run: |
+          python -m unittest discover -s tests/public -p 'test_*.py'
+          python -m unittest discover -s tests/hidden -p 'test_*.py'
+
+  scans:
+    name: 環境掃描腳本 smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: 一鍵初始化（機器效能 → 既有服務 → 環境指紋）
+        # 全新 checkout 沒有既有指紋，env-guard.py 會把當下環境設為基準並回傳 0。
+        # 這步驟守的是「init.py 在三個平台上都跑得起來、不會噴例外」。
+        run: python scripts/init.py
+
+      - name: 防護自我檢查（SessionStart hook 實際會跑的那支）
+        run: python scripts/guard-selfcheck.py

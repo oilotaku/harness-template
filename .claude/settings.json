@@ -1,12 +1,22 @@
 {
-  "$comment": "範例設定：實際欄位請依你使用的 Claude Code 版本文件調整",
+  "$comment": "範例設定：實際欄位請依你使用的 Claude Code 版本文件調整。deny 清單是意圖宣示與第一層過濾，不是完整防護（rm -fr、小寫 drop table 等變形不會命中），真正的破壞性操作防護仍要靠 permission mode 與人工核准。",
   "permissions": {
     "allow": [
       "Bash(python3 scripts/init.py)",
       "Bash(python3 scripts/machine-profile.py)",
       "Bash(python3 scripts/service-scan.py)",
       "Bash(python3 scripts/env-guard.py)",
-      "Bash(python3 scripts/lock-tests.py)"
+      "Bash(python3 scripts/lock-tests.py)",
+      "Bash(python3 scripts/verify-locks.py)",
+      "Bash(python3 scripts/guard-selfcheck.py)",
+      "Bash(python3 scripts/test-guards.py)",
+      "Bash(python3 scripts/test-locks.py)",
+      "Bash(python3 scripts/seal-hidden-tests.py:*)",
+      "Bash(python3 scripts/run-hidden-tests.py:*)",
+      "Bash(python3 scripts/test-vault.py)",
+      "Bash(python3 scripts/env-guard.py:*)",
+      "Bash(python3 scripts/test-env-guard.py)",
+      "Bash(python3 scripts/test-config.py)"
     ],
     "deny": [
       "Bash(rm -rf *)",
@@ -16,13 +26,26 @@
     ]
   },
   "hooks": {
-    "PreToolUse": [
+    "SessionStart": [
       {
-        "matcher": "Edit|Write|Bash|Read|Grep|Glob",
         "hooks": [
           {
             "type": "command",
-            "command": "python3 scripts/guard-hidden-tests.py"
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/guard-selfcheck.py\"",
+            "timeout": 30,
+            "statusMessage": "檢查防作弊機制是否生效"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|MultiEdit|Write|NotebookEdit|Bash|Read|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/guard-hidden-tests.py\"",
+            "timeout": 10
           }
         ]
       }

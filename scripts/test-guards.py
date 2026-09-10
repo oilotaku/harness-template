@@ -15,13 +15,22 @@ stdin payload，斷言 exit code 符合預期。
 
 用法：python3 scripts/test-guards.py
 """
+import hashlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-GUARD_SCRIPT = Path(__file__).resolve().parent / "guard-hidden-tests.py"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import utf8_output  # noqa: E402
+
+utf8_output.enable()  # Windows 主控台預設用 ANSI 代碼頁，不先切 UTF-8 會印不出中文
+
+SCRIPTS_DIR = Path(__file__).resolve().parent
+GUARD_SCRIPT = SCRIPTS_DIR / "guard-hidden-tests.py"
 
 CASES = []
 
@@ -34,19 +43,78 @@ def case(name):
     return deco
 
 
-def run_guard(cwd: Path, payload) -> subprocess.CompletedProcess:
+def run_guard(cwd: Path, payload, raw_stdin: str = None, extra_env=None) -> subprocess.CompletedProcess:
+    # 一律明確指定 CLAUDE_PROJECT_DIR，否則會繼承外層 Claude Code session 的值，
+    # 讓 guard 拿真正的專案目錄當基準，測試就會全部對不上暫存情境。
+    env = {**os.environ, "CLAUDE_PROJECT_DIR": str(cwd)}
+    env.pop("HARNESS_HIDDEN_DIR", None)
+    if extra_env:
+        env.update(extra_env)
     return subprocess.run(
         [sys.executable, str(GUARD_SCRIPT)],
-        input=json.dumps(payload),
-        text=True,
+        input=raw_stdin if raw_stdin is not None else json.dumps(payload),
+        text=True, encoding="utf-8", errors="replace",
         capture_output=True,
         cwd=cwd,
+        env=env,
+    )
+
+
+def default_vault(tmp: Path) -> Path:
+    """guard 推導封存庫預設位置的方式（見 guard-hidden-tests.py 的 _vault_dirs）。"""
+    return tmp.parent / ".harness-hidden" / tmp.name
+
+
+def write_manifest(tmp: Path, task_dir: Path) -> None:
+    (tmp / ".harness").mkdir(exist_ok=True)
+    (tmp / ".harness" / "hidden-manifest.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "tasks": {
+                    "T1": {
+                        "task_dir": str(task_dir),
+                        "vault_dir": str(task_dir.parent),
+                        "token_sha256": "0" * 64,
+                        "files": [],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
     )
 
 
 def lock(tmp: Path, *paths: str) -> None:
+    """寫入舊格式（純路徑）鎖定清單，確保向後相容仍然有效。"""
     (tmp / ".harness").mkdir(exist_ok=True)
-    (tmp / ".harness" / "locked-tests.list").write_text("\n".join(paths) + "\n")
+    (tmp / ".harness" / "locked-tests.list").write_text(
+        "\n".join(paths) + "\n", encoding="utf-8"
+    )
+
+
+def lock_with_hash(tmp: Path, *paths: str) -> None:
+    """寫入新格式（`<sha256>  <路徑>`）鎖定清單，比照 lock-tests.py 的輸出。"""
+    (tmp / ".harness").mkdir(exist_ok=True)
+    lines = []
+    for path in paths:
+        target = tmp / path
+        digest = (
+            hashlib.sha256(target.read_bytes()).hexdigest()
+            if target.is_file()
+            else "0" * 64
+        )
+        lines.append(f"{digest}  {path}")
+    (tmp / ".harness" / "locked-tests.list").write_text(
+        "\n".join(lines) + "\n", encoding="utf-8"
+    )
+
+
+def touch(tmp: Path, path: str, content: str = "assert True\n") -> Path:
+    target = tmp / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+    return target
 
 
 # ---------------------------------------------------------------- Edit/Write
@@ -72,7 +140,7 @@ def _(tmp: Path):
 def _(tmp: Path):
     hidden_dir = tmp / "tests" / "hidden"
     hidden_dir.mkdir(parents=True)
-    (hidden_dir / "test_existing.py").write_text("# 既有隱藏測試\n")
+    (hidden_dir / "test_existing.py").write_text("# 既有隱藏測試\n", encoding="utf-8")
     result = run_guard(
         tmp,
         {"tool_name": "Write", "tool_input": {"file_path": "tests/hidden/test_existing.py"}},
@@ -84,7 +152,7 @@ def _(tmp: Path):
 def _(tmp: Path):
     hidden_dir = tmp / "tests" / "hidden"
     hidden_dir.mkdir(parents=True)
-    (hidden_dir / "test_existing.py").write_text("# 既有隱藏測試\n")
+    (hidden_dir / "test_existing.py").write_text("# 既有隱藏測試\n", encoding="utf-8")
     result = run_guard(
         tmp, {"tool_name": "Edit", "tool_input": {"file_path": "tests/hidden/test_existing.py"}}
     )
@@ -122,47 +190,20 @@ def _(tmp: Path):
     assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
 
 
-@case("缺 file_path 應放行（fail open）")
+@case("缺 file_path 應放行（payload 合法，只是沒有可判斷的目標）")
 def _(tmp: Path):
     result = run_guard(tmp, {"tool_name": "Edit", "tool_input": {}})
     assert result.returncode == 0, f"exit={result.returncode} stderr={result.stderr}"
 
 
-@case("malformed JSON 應放行（fail open）")
+@case("合法但非物件的 JSON（null）應 fail-closed 且不噴未處理例外")
 def _(tmp: Path):
-    result = subprocess.run(
-        [sys.executable, str(GUARD_SCRIPT)],
-        input="not json",
-        text=True,
-        capture_output=True,
-        cwd=tmp,
-    )
-    assert result.returncode == 0, f"exit={result.returncode} stderr={result.stderr}"
-
-
-@case("合法但非物件的 JSON（null）應放行且不噴未處理例外")
-def _(tmp: Path):
-    result = subprocess.run(
-        [sys.executable, str(GUARD_SCRIPT)],
-        input="null",
-        text=True,
-        capture_output=True,
-        cwd=tmp,
-    )
-    assert result.returncode == 0, f"exit={result.returncode} stderr={result.stderr}"
+    # 2026-09-10（P0-5）行為變更：這三種「看不懂的輸入」以前是放行（fail open），
+    # 現在一律擋下。理由見 guard-hidden-tests.py 模組說明——腳本對這次呼叫
+    # 已經失去判斷能力，放行等於在防護失效時默默全開，而且沒有任何訊號。
+    result = run_guard(tmp, None, raw_stdin="null")
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
     assert "Traceback" not in result.stderr, f"不該有未處理例外：{result.stderr}"
-
-
-@case("合法但非物件的 JSON（陣列）應放行")
-def _(tmp: Path):
-    result = subprocess.run(
-        [sys.executable, str(GUARD_SCRIPT)],
-        input="[1, 2, 3]",
-        text=True,
-        capture_output=True,
-        cwd=tmp,
-    )
-    assert result.returncode == 0, f"exit={result.returncode} stderr={result.stderr}"
 
 
 # --------------------------------------------------------------------- Bash
@@ -345,6 +386,375 @@ def _(tmp: Path):
         tmp, {"tool_name": "Glob", "tool_input": {"pattern": "*.py", "path": "tests/hidden"}}
     )
     assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+# ------------------------------------------------- P0-1：路徑寫法正規化（2026-09-10）
+#
+# 以下這批案例對應 docs/improvement-suggestions.md 的 P0-1：第二版的
+# Edit/Write/Read/Grep/Glob 分支只做字串前綴比對，因此絕對路徑、`./`、`//`、`..`
+# 這些寫法全部擋不到。其中「絕對路徑」尤其嚴重——Read 工具的 file_path 規定
+# 就是要絕對路徑，等於讀取保護在正常用法下完全失效。
+
+
+@case("P0-1 Read 用絕對路徑讀 tests/hidden/ 應被擋（Read 工具規定就是絕對路徑）")
+def _(tmp: Path):
+    result = run_guard(
+        tmp,
+        {"tool_name": "Read", "tool_input": {"file_path": str(tmp / "tests/hidden/test_x.py")}},
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-1 Read 用 ./ 前綴讀 tests/hidden/ 應被擋")
+def _(tmp: Path):
+    result = run_guard(
+        tmp, {"tool_name": "Read", "tool_input": {"file_path": "./tests/hidden/test_x.py"}}
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-1 Read 用雙斜線 tests//hidden/ 應被擋")
+def _(tmp: Path):
+    result = run_guard(
+        tmp, {"tool_name": "Read", "tool_input": {"file_path": "tests//hidden/test_x.py"}}
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-1 Read 用 ../ 迂迴回 tests/hidden/ 應被擋")
+def _(tmp: Path):
+    result = run_guard(
+        tmp,
+        {"tool_name": "Read", "tool_input": {"file_path": "tests/../tests/hidden/test_x.py"}},
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-1 Write 用絕對路徑覆寫已鎖定的公開測試應被擋")
+def _(tmp: Path):
+    touch(tmp, "tests/public/test_p.py")
+    lock_with_hash(tmp, "tests/public/test_p.py")
+    result = run_guard(
+        tmp,
+        {"tool_name": "Write", "tool_input": {"file_path": str(tmp / "tests/public/test_p.py")}},
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-1 Edit 用絕對路徑修改 tests/hidden/ 應被擋")
+def _(tmp: Path):
+    result = run_guard(
+        tmp,
+        {"tool_name": "Edit", "tool_input": {"file_path": str(tmp / "tests/hidden/test_x.py")}},
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-1 Bash cat 用絕對路徑讀 tests/hidden/ 應被擋")
+def _(tmp: Path):
+    result = run_guard(
+        tmp,
+        {"tool_name": "Bash", "tool_input": {"command": f"cat {tmp / 'tests/hidden/test_x.py'}"}},
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-1 repo 之外的絕對路徑不歸本 hook 管，應放行")
+def _(tmp: Path):
+    # 另一個專案自己的 tests/hidden/ 不該被這個 repo 的 hook 擋下來。
+    outside = tmp.parent / "another-project" / "tests" / "hidden" / "test_x.py"
+    result = run_guard(tmp, {"tool_name": "Read", "tool_input": {"file_path": str(outside)}})
+    assert result.returncode == 0, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-1 cd 到 repo 之外後的相對路徑應放行（不是本 repo 的隱藏測試）")
+def _(tmp: Path):
+    result = run_guard(
+        tmp,
+        {"tool_name": "Bash", "tool_input": {"command": "cd .. && cat tests/hidden/test_x.py"}},
+    )
+    assert result.returncode == 0, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-1 新格式（含 sha256）鎖定清單一樣能擋下對公開測試的寫入")
+def _(tmp: Path):
+    touch(tmp, "tests/public/test_p.py")
+    lock_with_hash(tmp, "tests/public/test_p.py")
+    result = run_guard(
+        tmp, {"tool_name": "Edit", "tool_input": {"file_path": "tests/public/test_p.py"}}
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-1 新格式鎖定清單仍允許讀取公開測試（鎖定只限制寫入）")
+def _(tmp: Path):
+    touch(tmp, "tests/public/test_p.py")
+    lock_with_hash(tmp, "tests/public/test_p.py")
+    result = run_guard(
+        tmp, {"tool_name": "Bash", "tool_input": {"command": "cat tests/public/test_p.py"}}
+    )
+    assert result.returncode == 0, f"exit={result.returncode} stderr={result.stderr}"
+
+
+# ------------------------------------------------- P0-5：fail-closed（2026-09-10）
+
+
+@case("P0-5 stdin 不是合法 JSON 時應 fail-closed（擋下而非放行）")
+def _(tmp: Path):
+    result = run_guard(tmp, None, raw_stdin="這不是 JSON")
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-5 stdin 是合法 JSON 但最外層不是物件時應 fail-closed")
+def _(tmp: Path):
+    result = run_guard(tmp, None, raw_stdin="[1, 2, 3]")
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P0-5 空 stdin 應 fail-closed")
+def _(tmp: Path):
+    result = run_guard(tmp, None, raw_stdin="")
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+# ------------------------------------------- P1-1：封存庫路徑保護（2026-09-10）
+#
+# 封存後的隱藏測試在 repo 之外，而且內容是加密的（見 scripts/hidden_vault.py），
+# 所以這一層只是縱深防禦——目的是讓誤觸的人得到明確訊息，而不是一堆亂碼。
+
+
+@case("P1-1 Read 預設封存庫路徑應被擋")
+def _(tmp: Path):
+    result = run_guard(
+        tmp,
+        {"tool_name": "Read", "tool_input": {"file_path": str(default_vault(tmp) / "T1/test.py.enc")}},
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P1-1 Bash cat 預設封存庫路徑應被擋")
+def _(tmp: Path):
+    result = run_guard(
+        tmp,
+        {"tool_name": "Bash", "tool_input": {"command": f"cat {default_vault(tmp) / 'T1/test.py.enc'}"}},
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P1-1 封存庫底下的存取不分動詞一律擋（ls 也擋）")
+def _(tmp: Path):
+    result = run_guard(
+        tmp, {"tool_name": "Bash", "tool_input": {"command": f"ls {default_vault(tmp)}"}}
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P1-1 HARNESS_HIDDEN_DIR 覆寫的位置也受保護")
+def _(tmp: Path):
+    custom = tmp.parent / f"custom-vault-{tmp.name}"
+    result = run_guard(
+        tmp,
+        {"tool_name": "Read", "tool_input": {"file_path": str(custom / "T1/test.py.enc")}},
+        extra_env={"HARNESS_HIDDEN_DIR": str(custom)},
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P1-1 manifest 記錄過的封存位置也受保護（封存時有覆寫、現在沒設環境變數）")
+def _(tmp: Path):
+    recorded = tmp.parent / f"recorded-vault-{tmp.name}" / "T1"
+    write_manifest(tmp, recorded)
+    result = run_guard(
+        tmp, {"tool_name": "Read", "tool_input": {"file_path": str(recorded / "test.py.enc")}}
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P1-1 執行 run-hidden-tests.py 本身不該被擋（唯一的合法入口）")
+def _(tmp: Path):
+    result = run_guard(
+        tmp,
+        {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "python3 scripts/run-hidden-tests.py --task-id T1 --token abc123"
+            },
+        },
+    )
+    assert result.returncode == 0, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P1-1 執行 seal-hidden-tests.py 本身不該被擋")
+def _(tmp: Path):
+    result = run_guard(
+        tmp,
+        {"tool_name": "Bash", "tool_input": {"command": "python3 scripts/seal-hidden-tests.py --task-id T1"}},
+    )
+    assert result.returncode == 0, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("P1-1 repo 之外、與封存庫無關的路徑仍然放行")
+def _(tmp: Path):
+    result = run_guard(
+        tmp, {"tool_name": "Read", "tool_input": {"file_path": str(tmp.parent / "unrelated/x.py")}}
+    )
+    assert result.returncode == 0, f"exit={result.returncode} stderr={result.stderr}"
+
+
+# --------------------------------------- settings.json 與腳本之間不能漂移（P2-4）
+
+
+@case("settings.json 的 PreToolUse matcher 涵蓋 guard 實際處理的每一種工具")
+def _(tmp: Path):
+    # 舊的 matcher 是 "Edit|Write|Bash|Read|Grep|Glob"，能擋到 MultiEdit/NotebookEdit
+    # 純粹是因為名稱剛好含有 "Edit"。這個案例確保兩邊不會再漂移——
+    # 有人在 guard 新增一種工具、卻忘了改 matcher 時，這裡會紅。
+    import re
+
+    settings = json.loads(
+        (SCRIPTS_DIR.parent / ".claude" / "settings.json").read_text(encoding="utf-8")
+    )
+    matchers = [
+        entry.get("matcher", "")
+        for entry in settings["hooks"]["PreToolUse"]
+        if any(
+            "guard-hidden-tests.py" in hook.get("command", "")
+            for hook in entry.get("hooks", [])
+        )
+    ]
+    assert matchers, "settings.json 裡找不到掛 guard-hidden-tests.py 的 PreToolUse hook"
+
+    covered = "|".join(matchers)
+    expected = ["Bash", "Edit", "MultiEdit", "Write", "NotebookEdit", "Read", "Grep", "Glob"]
+    missing = [tool for tool in expected if not re.search(covered, tool)]
+    assert not missing, f"matcher 沒涵蓋到這些工具：{missing}（目前 matcher：{covered}）"
+
+
+@case("settings.json 的 hook 指令用 $CLAUDE_PROJECT_DIR 絕對路徑（P0-5）")
+def _(tmp: Path):
+    settings = json.loads(
+        (SCRIPTS_DIR.parent / ".claude" / "settings.json").read_text(encoding="utf-8")
+    )
+    commands = [
+        hook.get("command", "")
+        for event in settings["hooks"].values()
+        for entry in event
+        for hook in entry.get("hooks", [])
+    ]
+    assert commands, "settings.json 裡沒有任何 hook 指令"
+    for command in commands:
+        assert "$CLAUDE_PROJECT_DIR" in command, (
+            f"hook 指令用了相對路徑：{command}——工作目錄不是 repo 根時會靜默失效"
+        )
+
+
+# ------------------------------------------ 舊代碼頁主控台（Windows）（P3-3）
+#
+# 這批案例是 CI 抓出來的：本模板所有腳本都印繁體中文，而 Python 在 Windows 上
+# 預設用系統 ANSI 代碼頁編 stdout，結果每一支腳本一 print 就丟 UnicodeEncodeError。
+# 用 PYTHONIOENCODING=cp1252 就能在任何平台重現，所以測試不需要真的跑在 Windows。
+
+
+def run_with_legacy_console(script: Path, cwd: Path, *args) -> subprocess.CompletedProcess:
+    env = {**os.environ, "PYTHONIOENCODING": "cp1252", "CLAUDE_PROJECT_DIR": str(cwd)}
+    env.pop("HARNESS_HIDDEN_DIR", None)
+    return subprocess.run(
+        [sys.executable, str(script), *args],
+        text=True, encoding="utf-8", errors="replace",
+        capture_output=True,
+        cwd=str(cwd),
+        env=env,
+    )
+
+
+@case("舊代碼頁主控台下，guard 擋下時仍必須 exit 2（不能因為印不出中文變成放行）")
+def _(tmp: Path):
+    # 這是最危險的情境：print 崩潰會讓 exit code 從 2 變成 1，
+    # 而 Claude Code 只把 2 當成 blocking error——「擋下」會悄悄變成「放行」。
+    result = subprocess.run(
+        [sys.executable, str(GUARD_SCRIPT)],
+        input=json.dumps({"tool_name": "Read", "tool_input": {"file_path": "tests/hidden/x.py"}}),
+        text=True, encoding="utf-8", errors="replace",
+        capture_output=True,
+        cwd=str(tmp),
+        env={**os.environ, "PYTHONIOENCODING": "cp1252", "CLAUDE_PROJECT_DIR": str(tmp)},
+    )
+    assert result.returncode == 2, (
+        f"exit={result.returncode}（在舊代碼頁主控台下失去攔截能力）stderr={result.stderr}"
+    )
+    assert "UnicodeEncodeError" not in result.stderr, result.stderr
+
+
+@case("舊代碼頁主控台下，所有入口腳本都不會因為印中文而崩潰")
+def _(tmp: Path):
+    checks = [
+        ("machine-profile.py", ()),
+        ("service-scan.py", ()),
+        ("env-guard.py", ()),
+        ("lock-tests.py", ()),
+        ("verify-locks.py", ()),
+        ("guard-selfcheck.py", ()),
+        ("seal-hidden-tests.py", ("--help",)),
+        ("run-hidden-tests.py", ("--help",)),
+    ]
+    broken = []
+    for name, args in checks:
+        result = run_with_legacy_console(SCRIPTS_DIR / name, tmp, *args)
+        if "UnicodeEncodeError" in result.stderr or "UnicodeEncodeError" in result.stdout:
+            broken.append(name)
+    assert not broken, f"這些腳本在舊代碼頁主控台下會崩潰：{broken}"
+
+
+@case("所有腳本都明確指定編碼，不依賴系統預設（靜態檢查）")
+def _(tmp: Path):
+    # 這類 bug 在這個 repo 已經咬了兩次（主控台輸出、檔案讀寫），而且都只在
+    # 非 UTF-8 環境才會發作，靠人工 review 很難每次都抓到。改用 AST 靜態檢查：
+    #   - read_text / write_text 必須帶 encoding
+    #   - open() 的文字模式必須帶 encoding
+    #   - subprocess 的 text=True 必須帶 encoding（否則用系統預設解子行程輸出）
+    import ast
+
+    problems = []
+    for script in sorted(SCRIPTS_DIR.glob("*.py")):
+        tree = ast.parse(script.read_text(encoding="utf-8"), filename=str(script))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            kwargs = {kw.arg for kw in node.keywords}
+            name = (
+                node.func.attr
+                if isinstance(node.func, ast.Attribute)
+                else getattr(node.func, "id", "")
+            )
+
+            if name in ("read_text", "write_text") and "encoding" not in kwargs:
+                problems.append(f"{script.name}:{node.lineno} {name}() 沒有指定 encoding")
+
+            if name == "open" and "encoding" not in kwargs:
+                # 二進位模式不需要 encoding。注意 mode 的位置不一樣：
+                # 內建 open(file, mode) 在 args[1]，Path.open(mode) 在 args[0]。
+                mode_index = 0 if isinstance(node.func, ast.Attribute) else 1
+                mode = ""
+                if len(node.args) > mode_index and isinstance(node.args[mode_index], ast.Constant):
+                    mode = str(node.args[mode_index].value)
+                for kw in node.keywords:
+                    if kw.arg == "mode" and isinstance(kw.value, ast.Constant):
+                        mode = str(kw.value.value)
+                if "b" not in mode:
+                    problems.append(f"{script.name}:{node.lineno} open() 沒有指定 encoding")
+
+            if name in ("run", "check_output", "Popen") and "encoding" not in kwargs:
+                for kw in node.keywords:
+                    if kw.arg in ("text", "universal_newlines") and getattr(
+                        kw.value, "value", False
+                    ) is True:
+                        problems.append(
+                            f"{script.name}:{node.lineno} subprocess 用了 text=True 卻沒指定 encoding"
+                        )
+
+    assert not problems, "以下位置依賴系統預設編碼，在非 UTF-8 環境會炸：\n  " + "\n  ".join(
+        problems
+    )
 
 
 def main() -> int:
