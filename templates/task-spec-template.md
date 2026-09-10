@@ -10,6 +10,8 @@
 - **model**：（依 docs/model-thinking-matrix.md 填寫）
 - **thinking**：（low / medium / high）
 - **security_review**：（true / false，是否需要 verifier-security）
+- **skills**：（本 task 需要啟用哪些 skill，由 `scripts/suggest-skills.py` 產出；
+  沒有就寫「無」。見 docs/skill-selection.md）
 - **estimate_class**：（doc / wiring / module / structural，見 docs/time-estimation.md）
 - **estimated_minutes**：（由 `python3 scripts/estimate-time.py` 產出的區間，例如 15–25）
 - **actual_minutes**：（驗收後由 Orchestrator 回填；不回填的話估時永遠不會變準）

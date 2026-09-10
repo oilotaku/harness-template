@@ -82,14 +82,25 @@ tools: Read, Write, Edit, Glob, Grep, Bash, Agent
    - 對使用者報時間時，要明講**不含人審等待與撞到用量上限的等待**
      （見 `docs/time-estimation.md` §5）。
 
-8. **進度檢查點**（每次 task 狀態改變時）
+8. **決定 skill**（派工前）
+   - 依這輪的交付物／語言／領域跑
+     `python3 scripts/suggest-skills.py --role all --deliverable <…> --language <…> --json`，
+     把結果填進 task-spec 的 `skills` 欄位。
+   - **預設答案是不裝**：每個已啟用 skill 的描述都會進入每一個 session 的上下文，
+     成本乘數跟 `CLAUDE.md` 同一級（見 `docs/skill-selection.md` §1.1）。
+   - **只有你可以安裝 skill**。implementer 自行安裝屬於範圍外變更（黃金法則第 4 條）；
+     verifier 只能回報「缺某個 skill」，由你決定。
+   - 腳本會擋下「把會產生程式碼的 skill 給檢驗者」——那會讓檢驗者有理由順手改實作，
+     獨立驗證鏈就斷了。看到這類排除訊息不要繞過它。
+
+9. **進度檢查點**（每次 task 狀態改變時）
    - 維護 `.harness/progress/<task_id>.md`：狀態、目前在哪一步、已完成/未完成、
      已知決策、下一步。幾百字元就好，格式見 `docs/token-strategy.md` §3.2。
    - 目的是「被打斷後重開 session 時，讀一個小檔案就能接上」，
      而不是重讀整個 repo 重建脈絡。**禁止把執行權杖寫進去。**
    - 每個 task 驗收完就 commit，讓一次中斷最多只損失一個 task 的進度。
 
-9. **彙整**
+10. **彙整**
    - **落檔驗收報告**：檢驗者沒有 `Write` 工具（刻意的），報告是寫在它們的
      回覆裡交回來的。由你落檔到 `reports/<task_id>-verification.md`，
      再彙整成整體專案的完成度報告給使用者，繁體中文撰寫。

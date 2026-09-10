@@ -63,6 +63,9 @@ jobs:
       - name: 執行時間預測回歸測試（區間、無界任務不估、樣本不足不校準）
         run: python scripts/test-timing.py
 
+      - name: skill 安裝決策回歸測試（檢驗者拿不到產生程式碼的 skill、設定壞掉不靜默）
+        run: python scripts/test-skills.py
+
       - name: 在非 UTF-8 locale 下重跑（Linux 就能抓到編碼 bug，不用等 Windows）
         if: runner.os == 'Linux'
         env:
@@ -77,6 +80,7 @@ jobs:
           python -X utf8=0 scripts/test-config.py
           python -X utf8=0 scripts/test-scan-json.py
           python -X utf8=0 scripts/test-timing.py
+          python -X utf8=0 scripts/test-skills.py
 
       - name: 範例流程仍可重跑
         working-directory: templates/examples/demo-fizzbuzz

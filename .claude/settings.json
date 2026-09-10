@@ -22,7 +22,9 @@
       "Bash(python3 scripts/test-env-guard.py)",
       "Bash(python3 scripts/test-config.py)",
       "Bash(python3 scripts/test-scan-json.py)",
-      "Bash(python3 scripts/test-timing.py)"
+      "Bash(python3 scripts/test-timing.py)",
+      "Bash(python3 scripts/suggest-skills.py:*)",
+      "Bash(python3 scripts/test-skills.py)"
     ],
     "deny": [
       "Bash(rm -rf *)",

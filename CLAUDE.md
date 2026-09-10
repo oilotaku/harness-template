@@ -104,6 +104,7 @@ harness-template/
 │   ├── commands/                 ← 斜線指令
 │   └── settings.json             ← 權限與 hook 設定範例
 ├── harness.config.json           ← （選用）專案自己的測試路徑慣例；非 Python 專案要設
+├── skills.catalog.json           ← （選用）這個專案要裝哪些 skill、給誰；見 docs/skill-selection.md
 ├── .github/workflows/ci.yml      ← CI：三平台 × 兩個 Python 版本跑全部回歸測試
 ├── scripts/                      ← 機器效能 / 服務掃描 / 環境守門腳本
 │                                    + 防作弊機制本體（封存、鎖定、稽核、hook）
