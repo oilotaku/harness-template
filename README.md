@@ -22,6 +22,8 @@
    （等同手動依序執行 `scripts/machine-profile.py`、`scripts/service-scan.py`、
    `scripts/env-guard.py` 這三支，合併成一個入口方便 `git pull` 後直接跑；
    結果只會印出來，不會自動幫你做任何決定。）
+   若之後換了機器、確認過確實是刻意更換，用
+   `python3 scripts/env-guard.py --update` 把目前環境設為新的基準指紋。
 3. 在 Claude Code 中打開專案，讓 `Orchestrator`（見 `.claude/agents/orchestrator.md`）
    依 `docs/task-decomposition-guide.md` 拆解你的需求。
 4. 依照 `docs/implementer-verifier-workflow.md` 的順序執行：
@@ -49,7 +51,7 @@
 | `scripts/lock-tests.py` | 把 `tests/public/` 的**路徑 + sha256** 寫進 `.harness/locked-tests.list` | verifier-test-writer 寫完公開測試後 |
 | `scripts/verify-locks.py` | **事後稽核**：重算雜湊比對，抓出「事前攔截被繞過」的竄改 | verifier-reviewer 驗收的第一步 |
 | `scripts/guard-selfcheck.py` | **自我檢查**：用已知該被擋的 payload 實跑一次，確認防護這次真的生效 | SessionStart hook |
-| `scripts/test-guards.py` / `test-locks.py` / `test-vault.py` | 上述機制各自的回歸測試 | 改動機制之後 |
+| `scripts/test-guards.py` / `test-locks.py` / `test-vault.py` / `test-env-guard.py` | 上述機制各自的回歸測試 | 改動機制之後 |
 
 四層各擋不同的東西，缺一不可：
 
@@ -61,10 +63,11 @@
 改動任何一支之後，請執行：
 
 ```bash
-python3 scripts/test-guards.py && python3 scripts/test-locks.py && python3 scripts/test-vault.py
+python3 scripts/test-guards.py && python3 scripts/test-locks.py \
+  && python3 scripts/test-vault.py && python3 scripts/test-env-guard.py
 ```
 
-這三組（共 86 個案例）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
+這四組（共 102 個案例）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
 六種組合上自動執行（見 `.github/workflows/ci.yml`）。這個 repo 特別需要 CI，
 因為機制退化是無聲的——guard 少擋一種路徑寫法、封存腳本少刪一個檔案，
 功能看起來都還正常，只有測試會發現。CI 一開就立刻抓到一個一直存在、

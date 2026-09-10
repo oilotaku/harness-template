@@ -20,12 +20,14 @@
 | P0-4 把隱藏測試當 oracle 執行 | ✅ 由 P1-1 消解 | 解密需要權杖，implementer 的上下文裡沒有 |
 | P0-3 Bash 包裝繞過 | 🟡 降級 | `tests/hidden/`（暫存區）仍可能被繞過；但封存後那裡是空的，封存庫拿到的是密文 |
 | P3-3 沒有 CI | ✅ 已修正 | 新增 `.github/workflows/ci.yml`：3 平台 × 2 個 Python 版本跑全部回歸測試 |
-| 其餘 P1-3 / P1-4 / P2 / P3 | ⬜ 未動 | 見下方各節 |
+| P3-1 env-guard 在容器每次誤報 | ✅ 已修正 | 指紋改成「身分／能力」分開比對、新增 `--update`，並抽出 `machine_facts.py` 與 `env_fingerprint.py` |
+| 其餘 P1-3 / P1-4 / P2 / P3-2 / P3-4 / P3-5 | ⬜ 未動 | 見下方各節 |
 
 已修正的項目在小節標題標上「✅ 已修正」，內文保留原本的問題描述當作紀錄。
 回歸測試：`python3 scripts/test-guards.py`（55 案例）、
-`python3 scripts/test-locks.py`（12 案例）、`python3 scripts/test-vault.py`（19 案例），
-共 86 案例，並由 CI 在三個平台 × 兩個 Python 版本上自動執行。
+`python3 scripts/test-locks.py`（12 案例）、`python3 scripts/test-vault.py`（19 案例）、
+`python3 scripts/test-env-guard.py`（16 案例），共 102 案例，
+並由 CI 在三個平台 × 兩個 Python 版本上自動執行。
 
 ---
 
@@ -382,7 +384,7 @@ L1 機械型任務則相反，明講「不需要冗長推理，直接依規格�
 
 ## P3 — 可用性與工程基礎建設
 
-### P3-1. `env-guard.py` 在容器／雲端環境會每次誤報
+### P3-1. `env-guard.py` 在容器／雲端環境會每次誤報 ✅ 已修正
 
 指紋只有 `hostname` / `os` / `arch`。Docker、Kubernetes 以及 Claude Code 的遠端執行環境，
 **每次啟動 hostname 都是隨機的**——代表在這些環境下 `env-guard.py` 每次都回報「不符」、
@@ -398,6 +400,28 @@ L1 機械型任務則相反，明講「不需要冗長推理，直接依規格�
   總記憶體級距、`os`/`arch` 這些不隨容器重建而變的特徵。
 - 加 `--update` 旗標，讓使用者確認後可用一行指令更新基準指紋，
   不必手動編輯 `.harness/env-fingerprint.json`（該檔目前還被 hook 擋著不能編輯）。
+
+> **實際落地**：三點都照做了，另外把判斷規則講得更精確：
+>
+> - **指紋分成「身分」與「能力」兩類**。身分類只有 `hostname`，在容器／K8s／
+>   Codespaces／CI 這類環境不參與比對（只記錄下來當參考）；能力類是
+>   `os`／`arch`／`container`／CPU 級距／記憶體級距，一律比對——**那才是黃金法則
+>   第 5 條真正在意的東西**，Orchestrator 要靠它們決定平行度。
+> - **CPU 與記憶體用級距而不是精確值**。雲端同規格機器的記憶體回報值會浮動
+>   （7.8GB / 8.0GB），精確比對只會變成另一種誤報來源；跨級距才代表能力真的變了。
+> - **容器判斷放寬**成「hostname 是否穩定」：除了 `/.dockerenv`、`/run/.containerenv`
+>   與 cgroup 標記，另外看 `KUBERNETES_SERVICE_HOST`、`CODESPACES`、`GITHUB_ACTIONS`
+>   等環境變數——K8s 與 Codespaces 不一定命中 `/.dockerenv`。
+> - 順帶把 `env-guard.py` 的路徑基準改成 `CLAUDE_PROJECT_DIR`（原本是相對路徑，
+>   工作目錄不對就會讀寫到別的地方）。
+>
+> 為了讓 `env-guard.py` 拿得到 CPU／記憶體／容器這些事實，把 `machine-profile.py`
+> 裡的事實蒐集函式抽成 `scripts/machine_facts.py`；比對規則另外抽成純函式模組
+> `scripts/env_fingerprint.py`，測試才能直接用合成資料測邊界，不必想辦法偽造機器。
+>
+> 對應測試：`scripts/test-env-guard.py`（16 案例），兩個方向都測——
+> **該擋的要擋**（換 OS／架構、跨級距、實體機搬進容器）、
+> **不該吵的不能吵**（容器換 hostname、記憶體同級距浮動、舊版指紋檔）。
 
 ### P3-2. 掃描腳本應提供機器可讀輸出
 

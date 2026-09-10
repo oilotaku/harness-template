@@ -13,7 +13,9 @@
       "Bash(python3 scripts/test-locks.py)",
       "Bash(python3 scripts/seal-hidden-tests.py:*)",
       "Bash(python3 scripts/run-hidden-tests.py:*)",
-      "Bash(python3 scripts/test-vault.py)"
+      "Bash(python3 scripts/test-vault.py)",
+      "Bash(python3 scripts/env-guard.py:*)",
+      "Bash(python3 scripts/test-env-guard.py)"
     ],
     "deny": [
       "Bash(rm -rf *)",

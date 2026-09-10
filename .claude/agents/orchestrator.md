@@ -32,6 +32,10 @@ tools: Read, Write, Edit, Glob, Grep, Bash, Agent
    - 若腳本回報「指紋不符 / 疑似不同機器」，**停止派工**，
      先把腳本輸出完整呈現給使用者並詢問：
      「目前偵測到的環境跟先前不同，是否要在這台機器上執行？需要提供哪些額外資訊？」
+   - 使用者確認是刻意更換之後，執行 `python3 scripts/env-guard.py --update`
+     把目前環境設為新基準（不要手動編輯 `.harness/` 底下的檔案）。
+   - 這個警告值得認真對待：容器／CI 這類環境的隨機主機名稱已經不會觸發它了，
+     所以它一旦響，代表作業系統、架構、是否容器、CPU 或記憶體級距真的變了。
 
 4. **任務拆解**（依 `docs/task-decomposition-guide.md`）
    - 把需求拆成多個 task，每個 task 填寫 `templates/task-spec-template.md`。
