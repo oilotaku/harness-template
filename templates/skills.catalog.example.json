@@ -1,0 +1,32 @@
+{
+  "skills": [
+    {
+      "name": "pdf",
+      "why": "本專案要產出/讀取 PDF 報表；沒有它就得自己拼 PDF 產生程式碼",
+      "when": { "deliverables": ["pdf"], "keywords": ["報表", "表單"] },
+      "roles": ["implementer"],
+      "produces_code": true
+    },
+    {
+      "name": "xlsx",
+      "why": "資料交付物是試算表，需要讀寫既有 .xlsx",
+      "when": { "deliverables": ["xlsx", "csv"], "keywords": ["試算表", "報表"] },
+      "roles": ["implementer"],
+      "produces_code": true
+    },
+    {
+      "name": "mcp-builder",
+      "why": "本專案要實作 MCP server，工具定義的慣例很容易寫錯",
+      "when": { "keywords": ["mcp"], "frameworks": ["fastmcp"] },
+      "roles": ["implementer"],
+      "produces_code": true
+    },
+    {
+      "name": "security-review",
+      "why": "verifier-security 做安全驗收時的檢查清單；只讀不寫",
+      "when": { "keywords": ["security", "auth", "金流", "個資"] },
+      "roles": ["verifier"],
+      "produces_code": false
+    }
+  ]
+}

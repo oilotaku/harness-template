@@ -68,7 +68,8 @@ tools: Read, Write, Edit, Glob, Grep, Bash
 3. **執行權杖**：封存腳本會印出一串只出現這一次的權杖。把它原封不動交回
    Orchestrator，**你自己不要留存**。權杖遺失沒有救援路徑（manifest 只存指紋），
    只能重寫一份隱藏測試再封存一次——這是刻意的，留後門等於留繞過方式。
-4. 一份「驗收標準對照表」：每條 task-spec 的驗收標準對應到哪些測試案例，
+4. 一份「驗收標準對照表」：**用 `templates/acceptance-mapping-template.md` 的格式**，
+   每條 task-spec 的驗收標準對應到哪些測試案例，
    確保沒有遺漏的驗收標準。**這份對照表不要放進 `tests/hidden/`**（會被一起封存
    加密，之後誰都讀不到）——直接在你的回覆/輸出裡交給 Orchestrator 轉交
    verifier-reviewer。對照表只寫「哪條驗收標準對應哪個測試名稱」，

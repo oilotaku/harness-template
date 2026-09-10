@@ -22,7 +22,8 @@ tools: Read, Glob, Grep, Bash
 > - 用 `python3 scripts/run-hidden-tests.py --task-id <task_id> --token <權杖>`
 >   取得通過/失敗結果與失敗訊息。**權杖由 Orchestrator 在派工時給你**；
 >   沒有權杖就跑不動，這是設計，不是故障。
-> - 「驗收標準對照表」是 `verifier-test-writer` 產出的**獨立文件**（不在封存庫裡），
+> - 「驗收標準對照表」是 `verifier-test-writer` 產出的**獨立文件**（不在封存庫裡，
+>   格式見 `templates/acceptance-mapping-template.md`），
 >   用它來對照哪個驗收標準對應哪個測試，不需要打開隱藏測試原始碼。
 > - 不要把權杖寫進驗收報告或任何會留下來的地方。
 
@@ -66,7 +67,14 @@ tools: Read, Glob, Grep, Bash
 
 ## 產出
 
-填寫 `templates/verification-report-template.md`，內容包含：
+**依 `templates/verification-report-template.md` 的格式，把驗收報告寫在你的回覆裡**，
+交回 Orchestrator 由它落檔到 `reports/<task_id>-verification.md`。
+
+你的工具只有 `Read, Glob, Grep, Bash`——**寫不了檔案，而且這是刻意的**
+（檢驗者只讀不寫治理性資訊，見 `docs/memory-management.md` §2）。
+所以這裡不是「填寫範本檔案」，是「照範本的欄位輸出內容」。
+
+報告內容包含：
 
 - 通過/不通過（不可有模糊地帶）
 - 每條驗收標準的證據（對應到哪個測試）

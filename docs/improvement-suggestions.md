@@ -30,9 +30,9 @@
 | 其餘 P1-3 / P2 / P3-2 / P3-4 / P3-5 | ⬜ 未動 | 見下方各節 |
 
 已修正的項目在小節標題標上「✅ 已修正」，內文保留原本的問題描述當作紀錄。
-回歸測試：`test-guards.py`（59）、`test-locks.py`（12）、`test-vault.py`（19）、
-`test-env-guard.py`（16）、`test-config.py`（24）、`test-scan-json.py`（32），
-共 **162 案例**，
+回歸測試：`test-guards.py`（62）、`test-locks.py`（12）、`test-vault.py`（19）、
+`test-env-guard.py`（16）、`test-config.py`（24）、`test-scan-json.py`（32）、
+`test-timing.py`（26），共 **191 案例**，
 並由 CI 在三個平台 × 兩個 Python 版本上自動執行。
 
 ---
@@ -349,7 +349,7 @@ verifier-reviewer 無從知道它跑的公開測試還是不是原本那份。
 
 ## P2 — 流程與文件一致性
 
-### P2-1. `verifier-reviewer` 沒有 `Write` 工具，卻被要求「填寫範本」
+### P2-1. `verifier-reviewer` 沒有 `Write` 工具，卻被要求「填寫範本」 ✅ 已修正
 
 `verifier-reviewer.md` 與 `verifier-security.md` 的「產出」章節都寫
 「填寫 `templates/verification-report-template.md`」，但兩者的 `tools` 只有
@@ -360,7 +360,13 @@ verifier-reviewer 無從知道它跑的公開測試還是不是原本那份。
 由 Orchestrator 落檔到 `reports/<task_id>-verification.md`」，
 並在 `orchestrator.md` §7 補上「落檔」這個動作（目前只說「收集」）。
 
-### P2-2. 缺少「驗收標準對照表」範本
+> **實際落地**：`verifier-reviewer.md` 與 `verifier-security.md` 的「產出」章節改成
+> 「**依範本格式把驗收報告寫在你的回覆裡**」，並明講「寫不了檔案，而且這是刻意的」——
+> 只改成「寫在回覆裡」而不解釋原因的話，下一個讀到的人還是會以為是工具設定漏掉。
+> `orchestrator.md` 的彙整步驟補上落檔動作（`reports/<task_id>-verification.md`），
+> `CLAUDE.md` §4 與 `README.md` 的目錄導覽也補上 `reports/`。
+
+### P2-2. 缺少「驗收標準對照表」範本 ✅ 已修正
 
 `verifier-test-writer.md` 要求交付三樣東西，第 3 樣是「驗收標準對照表」，
 而 `verifier-reviewer` 的驗收**完全依賴這份表**（因為它讀不到隱藏測試原始碼）。
@@ -372,6 +378,12 @@ verifier-reviewer 無從知道它跑的公開測試還是不是原本那份。
 對應隱藏測試「名稱」（不寫內容）、判定方式；另加兩節——
 「不可被 mock 繞過的測試」與「本表刻意不記載的資訊（斷言內容、期望值）」，
 避免對照表本身變成洩題管道。
+
+> **實際落地**：新增 `templates/acceptance-mapping-template.md`，含建議的兩節
+> （「不可被 mock 繞過的測試」與「本表刻意不記載的資訊」），另加一節涵蓋率自我檢查。
+> 開頭寫明這份表為什麼關鍵：隱藏測試封存後誰都讀不到內容，`verifier-reviewer`
+> 只拿得到通過/失敗，要判斷「每條驗收標準都真的被驗到」就只剩這份表。
+> `verifier-test-writer.md` 與 `verifier-reviewer.md` 都改成指向這個範本。
 
 ### P2-3. 子智能體 frontmatter 的 `thinking:` 欄位不會生效
 
@@ -402,7 +414,7 @@ L1 機械型任務則相反，明講「不需要冗長推理，直接依規格�
 並在 `scripts/test-guards.py` 補一個案例，直接讀 settings.json 的 matcher
 去比對腳本涵蓋的工具清單，確保兩邊不再漂移。
 
-### P2-5. 文件與實際檔案結構不同步
+### P2-5. 文件與實際檔案結構不同步 ✅ 已修正
 
 - `CLAUDE.md` §4 目錄結構沒列出 `tests/`（public/hidden 是整個機制的核心目錄），
   也沒有 `templates/examples/`。
@@ -415,6 +427,19 @@ L1 機械型任務則相反，明講「不需要冗長推理，直接依規格�
 ---
 
 ## P3 — 可用性與工程基礎建設
+
+> **實際落地**：四小項都處理了，而且**把它做成結構性的**而不是一次性訂正——
+> 逐項訂正的東西過幾輪就會再次漂移。
+>
+> - `CLAUDE.md` §1 不再引用 `orchestrator.md` 的步驟編號（那份清單會增修，
+>   寫死編號只會讓兩邊悄悄對不上）；§4 目錄結構補上 `reports/`。
+> - `README.md` 新增「三個斜線指令的使用時機」表，寫明 `/task-plan` 的產出
+>   是 `/task-dispatch` 的輸入。
+> - `.claude/settings.json` 的 allow 清單補齊所有腳本，並把會帶參數的改成 `:*`
+>   形式（原本 `Bash(python3 scripts/machine-profile.py)` 對不上 `--json` 呼叫）。
+> - **三個新的漂移測試**（`test-guards.py`）：每一組 `scripts/test-*.py` 都必須
+>   同時出現在 settings.json 的 allow 清單、README 的測試指令、以及 ci.yml 裡。
+>   新增測試卻忘了同步的話，現在會直接紅。
 
 ### P3-1. `env-guard.py` 在容器／雲端環境會每次誤報 ✅ 已修正
 
@@ -575,7 +600,7 @@ jobs:
 > 重現這個情境，斷言 (1) guard 在舊代碼頁下擋人時仍然 exit 2、
 > (2) 所有入口腳本都不會因為印中文而崩潰。
 
-### P3-4. `.claude/settings.json` 的 deny 規則說服力不足
+### P3-4. `.claude/settings.json` 的 deny 規則說服力不足 ✅ 已修正
 
 ```json
 "deny": ["Bash(rm -rf *)", "Bash(git push --force*)", "Bash(*DROP TABLE*)"]
@@ -590,6 +615,12 @@ jobs:
 「deny 清單是意圖宣示與第一層過濾，不是完整防護；真正的破壞性操作防護
 靠 permission mode 與人工核准」，並把 `verifier-security.md` 第 5 條改成
 「檢查程式碼**本身**有沒有發出破壞性指令」，而不是檢查有沒有被 deny 清單擋住。
+
+> **實際落地**：`settings.json` 的 `$comment` 已標註 deny 清單是意圖宣示與第一層
+> 過濾、不是完整防護；本輪補上另一半——`verifier-security.md` 檢查清單第 5 條
+> 改成「檢查**程式碼本身**有沒有發出破壞性指令，以及觸發條件是否可能在非預期
+> 情況下成立」，並明講**不可以用「deny 清單有擋」當作通過的理由**。
+> 原本的寫法會讓檢驗者把一個前綴比對清單當成安全機制。
 
 ### P3-5. 其他小項
 

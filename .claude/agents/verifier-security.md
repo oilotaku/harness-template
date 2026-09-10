@@ -21,13 +21,18 @@ tools: Read, Glob, Grep, Bash
 4. **依賴套件**：新增的第三方套件是否來源可信（可比照
    claude-code-ultimate-guide-zh 的 MCP 審查流程：來源、star 數、維護狀況、
    權限最小化）。
-5. **危險操作防護**：是否有防止 `rm -rf`、強制推送、清空資料庫等
-   破壞性操作在未經確認下被執行。
+5. **破壞性操作**：檢查**程式碼本身**有沒有發出破壞性指令（遞迴刪除、
+   強制推送、清空資料表、覆蓋既有資料檔），以及那些指令的觸發條件是否
+   可能在非預期情況下成立。
+   **不要用「`.claude/settings.json` 的 deny 清單有擋」當作通過的理由**——
+   那份清單是前綴/萬用字元比對，`rm -fr`、`cd x && rm -rf .`、`git push -f`、
+   小寫 `drop table` 都不會命中。它是意圖宣示與第一層過濾，不是完整防護。
 
 ## 產出
 
-同樣填寫 `templates/verification-report-template.md`，額外附加「安全性發現」章節，
-標註嚴重程度（高/中/低）與建議修正方式，交回 Orchestrator。
+同樣**依 `templates/verification-report-template.md` 的格式寫在你的回覆裡**
+（你沒有 `Write` 工具，這是刻意的），額外附加「安全性發現」章節，
+標註嚴重程度（高/中/低）與建議修正方式，交回 Orchestrator 落檔。
 
 ## 禁止事項
 
