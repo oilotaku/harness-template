@@ -57,6 +57,9 @@ jobs:
       - name: 專案測試路徑設定回歸測試（設定有效 + 設定錯誤不靜默）
         run: python scripts/test-config.py
 
+      - name: 掃描腳本機器可讀輸出回歸測試（--json 只能吐 JSON、平行度換算、快取）
+        run: python scripts/test-scan-json.py
+
       - name: 在非 UTF-8 locale 下重跑（Linux 就能抓到編碼 bug，不用等 Windows）
         if: runner.os == 'Linux'
         env:
@@ -69,6 +72,7 @@ jobs:
           python -X utf8=0 scripts/test-vault.py
           python -X utf8=0 scripts/test-env-guard.py
           python -X utf8=0 scripts/test-config.py
+          python -X utf8=0 scripts/test-scan-json.py
 
       - name: 範例流程仍可重跑
         working-directory: templates/examples/demo-fizzbuzz
@@ -95,6 +99,10 @@ jobs:
         # 全新 checkout 沒有既有指紋，env-guard.py 會把當下環境設為基準並回傳 0。
         # 這步驟守的是「init.py 在三個平台上都跑得起來、不會噴例外」。
         run: python scripts/init.py
+
+      - name: 一鍵初始化的機器可讀輸出（三平台都要是合法 JSON）
+        # 人看的模式跑得起來，不代表 --json 沒有混進中文——那正是最難察覺的退化。
+        run: python scripts/init.py --json | python -c "import json,sys; json.load(sys.stdin)"
 
       - name: 防護自我檢查（SessionStart hook 實際會跑的那支）
         run: python scripts/guard-selfcheck.py

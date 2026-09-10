@@ -22,6 +22,10 @@
    （等同手動依序執行 `scripts/machine-profile.py`、`scripts/service-scan.py`、
    `scripts/env-guard.py` 這三支，合併成一個入口方便 `git pull` 後直接跑；
    結果只會印出來，不會自動幫你做任何決定。）
+
+   三支腳本與 `init.py` 都支援 `--json`（stdout 只有 JSON），給 Orchestrator 讀：
+   `python3 scripts/init.py --json`。裡面已經算好 `max_parallel_agents`
+   與 `suggested_port_range`，不必再從中文散文裡自己換算。
    若之後換了機器、確認過確實是刻意更換，用
    `python3 scripts/env-guard.py --update` 把目前環境設為新的基準指紋。
 3. 在 Claude Code 中打開專案，讓 `Orchestrator`（見 `.claude/agents/orchestrator.md`）
@@ -56,7 +60,9 @@
 | `scripts/lock-tests.py` | 把 `tests/public/` 的**路徑 + sha256** 寫進 `.harness/locked-tests.list` | verifier-test-writer 寫完公開測試後 |
 | `scripts/verify-locks.py` | **事後稽核**：重算雜湊比對，抓出「事前攔截被繞過」的竄改 | verifier-reviewer 驗收的第一步 |
 | `scripts/guard-selfcheck.py` | **自我檢查**：用已知該被擋的 payload 實跑一次，確認防護這次真的生效 | SessionStart hook |
-| `scripts/test-guards.py` / `test-locks.py` / `test-vault.py` / `test-env-guard.py` / `test-config.py` | 上述機制各自的回歸測試 | 改動機制之後 |
+| `scripts/capacity.py` | 由 CPU/記憶體算出平行度上限、挑出沒被佔用的連接埠區間（純函式） | 被 import，不直接執行 |
+| `scripts/scan_cache.py` | 掃描結果快取（`.harness/last-scan.json`），能力指紋不符就不給重用 | 被 import，不直接執行 |
+| `scripts/test-guards.py` / `test-locks.py` / `test-vault.py` / `test-env-guard.py` / `test-config.py` / `test-scan-json.py` | 上述機制各自的回歸測試 | 改動機制之後 |
 
 四層各擋不同的東西，缺一不可：
 
@@ -70,10 +76,10 @@
 ```bash
 python3 scripts/test-guards.py && python3 scripts/test-locks.py \
   && python3 scripts/test-vault.py && python3 scripts/test-env-guard.py \
-  && python3 scripts/test-config.py
+  && python3 scripts/test-config.py && python3 scripts/test-scan-json.py
 ```
 
-這五組（共 130 個案例）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
+這六組（共 162 個案例）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
 六種組合上自動執行（見 `.github/workflows/ci.yml`）。這個 repo 特別需要 CI，
 因為機制退化是無聲的——guard 少擋一種路徑寫法、封存腳本少刪一個檔案，
 功能看起來都還正常，只有測試會發現。CI 一開就立刻抓到一個一直存在、

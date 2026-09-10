@@ -8,6 +8,11 @@ description: 單獨執行機器效能、既有服務、環境指紋掃描，不�
 2. `python3 scripts/service-scan.py`
 3. `python3 scripts/env-guard.py`
 
+要拿數字去做決定（平行度、挑連接埠）時改用 `python3 scripts/init.py --json`：
+stdout 只有 JSON，裡面已經算好 `max_parallel_agents` 與 `suggested_port_range`。
+注意 `max_parallel_agents` 是**機器容量上限，不是建議值**（預設序列執行），
+而 `suggested_port_range` 為 null 代表這次掃描不完整，必須人工確認。
+
 若 `env-guard.py` 回報指紋不符，停在這裡並詢問使用者是否要：
 (a) 將目前環境設為新的預期指紋 —— 使用者確認後執行
     `python3 scripts/env-guard.py --update`（不要手動改 `.harness/` 底下的檔案，
