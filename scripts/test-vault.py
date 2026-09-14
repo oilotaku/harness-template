@@ -4,11 +4,14 @@
 對應 docs/history/improvement-suggestions.md 的 P1-1。與 test-guards.py、test-locks.py
 同樣的作法：在暫存目錄裡造一個最小的 repo，用 subprocess 執行腳本並斷言結果。
 
-這批測試守的是隔離機制的四個核心承諾：
+這批測試守的是隔離機制的六個核心承諾：
   1. 封存後工作目錄裡沒有明文
   2. 封存檔案的內容是密文（就算被讀到也拿不到題目）
   3. manifest 不含權杖本身
   4. 沒有正確權杖就跑不動隱藏測試
+  5. 解密後的明文落在受 guard 保護的封存庫裡，而且不論怎麼結束都會被清掉
+     （含被強制中斷之後，由下一次執行補清）
+  6. 權杖遺失只能作廢重寫，而且作廢留得下痕跡、洗不白歷史
 
 用法：python3 scripts/test-vault.py
 """
@@ -29,6 +32,7 @@ utf8_output.enable()  # Windows 主控台預設用 ANSI 代碼頁，不先切 UT
 SCRIPTS_DIR = Path(__file__).resolve().parent
 SEAL = SCRIPTS_DIR / "seal-hidden-tests.py"
 RUN = SCRIPTS_DIR / "run-hidden-tests.py"
+DISCARD = SCRIPTS_DIR / "discard-sealed-task.py"
 
 CASES = []
 
@@ -44,6 +48,20 @@ class T(unittest.TestCase):
     def test_repo_root_env_is_available(self):
         import os
         self.assertTrue(os.environ.get("HARNESS_REPO_ROOT"))
+"""
+
+# 把「自己被解到哪個目錄」寫回 repo，用來斷言明文不是解在 /tmp 而是封存庫底下。
+PROBING_TEST = """import os
+import unittest
+from pathlib import Path
+
+_here = Path(__file__).resolve().parent
+(Path(os.environ["HARNESS_REPO_ROOT"]) / "rundir.txt").write_text(str(_here), encoding="utf-8")
+
+
+class T(unittest.TestCase):
+    def test_ok(self):
+        self.assertTrue(True)
 """
 
 FAILING_TEST = """import unittest
@@ -301,7 +319,7 @@ def _(tmp: Path):
     assert result.returncode == 0, f"exit={result.returncode} stdout={result.stdout}\n{result.stderr}"
 
 
-@case("執行結束後，解密用的暫存目錄會被刪掉")
+@case("執行結束後，解密用的暫存目錄會被刪掉（封存庫與系統暫存目錄都要乾淨）")
 def _(tmp: Path):
     repo = make_repo(tmp)
     token = seal(repo)
@@ -309,7 +327,11 @@ def _(tmp: Path):
     before = set(Path(tempfile.gettempdir()).glob("harness-hidden-*"))
     run_script(RUN, repo, "--task-id", "T1", "--token", token)
     after = set(Path(tempfile.gettempdir()).glob("harness-hidden-*"))
-    assert after <= before, f"暫存目錄沒有被清掉：{after - before}"
+    assert after <= before, f"系統暫存目錄沒有被清掉：{after - before}"
+
+    vault_dir = Path(manifest_of(repo)["tasks"]["T1"]["vault_dir"])
+    leftovers = list(vault_dir.glob(".run-*"))
+    assert not leftovers, f"封存庫裡留下解密目錄：{leftovers}"
 
 
 @case("多個 task 各自獨立：T1 的權杖不能拿來解 T2")
@@ -569,6 +591,252 @@ def _(tmp: Path):
     assert git(repo, "add", "-A").returncode == 0
     assert git(repo, "commit", "-qm", "init").returncode == 0
     seal(repo)
+
+
+# --------------------------------- 解密明文的位置與清理（撞到用量上限的那個情境）
+
+
+@case("解密後的明文解在封存庫底下，不是系統暫存目錄（殘留才落在 guard 保護範圍內）")
+def _(tmp: Path):
+    repo = make_repo(tmp, hidden_source=PROBING_TEST)
+    token = seal(repo)
+
+    result = run_script(RUN, repo, "--task-id", "T1", "--token", token)
+    assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
+
+    rundir = Path((repo / "rundir.txt").read_text(encoding="utf-8").strip())
+    vault_dir = Path(manifest_of(repo)["tasks"]["T1"]["vault_dir"])
+    assert rundir.parent == vault_dir, f"解密目錄不在封存庫底下：{rundir}（封存庫 {vault_dir}）"
+    assert rundir.name.startswith(".run-"), f"解密目錄命名不符：{rundir.name}"
+
+
+@case("上一次被強制中斷留下的解密目錄，下一次執行會清掉並警告（擋 SIGKILL 的唯一一層）")
+def _(tmp: Path):
+    repo = make_repo(tmp)
+    token = seal(repo)
+    vault_dir = Path(manifest_of(repo)["tasks"]["T1"]["vault_dir"])
+
+    # 模擬「行程被直接砍掉」：目錄留著、裡面有明文、沒有 owner 標記。
+    stale = vault_dir / ".run-T1-deadbeef"
+    stale.mkdir()
+    (stale / "test_hidden.py").write_text("# 這是上一次沒清掉的明文\n", encoding="utf-8")
+
+    result = run_script(RUN, repo, "--task-id", "T1", "--token", token)
+    assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
+    assert not stale.exists(), "殘留的解密目錄沒有被清掉"
+    assert "先前留下的解密目錄" in result.stdout, (
+        f"清掉殘留卻沒有警告，verifier 不會知道上一次被砍過：\n{result.stdout}"
+    )
+
+
+@case("殘留清理不會誤刪「另一個行程正在用」的解密目錄")
+def _(tmp: Path):
+    repo = make_repo(tmp)
+    token = seal(repo)
+    vault_dir = Path(manifest_of(repo)["tasks"]["T1"]["vault_dir"])
+
+    # 標記成「這個測試行程正在用」——它確實活著，所以不該被當成殘留。
+    live = vault_dir / ".run-T2-inuse"
+    live.mkdir()
+    (live / ".owner-pid").write_text(str(os.getpid()), encoding="utf-8")
+
+    result = run_script(RUN, repo, "--task-id", "T1", "--token", token)
+    assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
+    assert live.exists(), "把別的行程正在用的解密目錄刪掉了（平行驗收會無故失敗）"
+
+
+@case("權杖錯誤等提前結束的路徑，一樣要報告清掉的殘留（那是同一次中斷留下的）")
+def _(tmp: Path):
+    repo = make_repo(tmp)
+    seal(repo)
+    vault_dir = Path(manifest_of(repo)["tasks"]["T1"]["vault_dir"])
+    stale = vault_dir / ".run-T1-killed"
+    stale.mkdir()
+    (stale / "test_hidden.py").write_text("# 明文\n", encoding="utf-8")
+
+    result = run_script(RUN, repo, "--task-id", "T1", "--token", "0" * 32)
+    assert result.returncode == 2, f"{result.stdout}\n{result.stderr}"
+    assert not stale.exists(), "提前結束的路徑沒有清掉殘留"
+    assert "先前留下的解密目錄" in result.stdout, (
+        f"清掉了殘留卻沒說，這次中斷的痕跡就這樣消失了：\n{result.stdout}"
+    )
+
+
+@case("--sweep 只清殘留、不需要權杖、不執行任何測試")
+def _(tmp: Path):
+    repo = make_repo(tmp)
+    seal(repo)
+    vault_dir = Path(manifest_of(repo)["tasks"]["T1"]["vault_dir"])
+    stale = vault_dir / ".run-T1-stale"
+    stale.mkdir()
+    (stale / "test_hidden.py").write_text("# 明文\n", encoding="utf-8")
+
+    result = run_script(RUN, repo, "--sweep")
+    assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
+    assert not stale.exists(), "--sweep 沒有清掉殘留"
+    assert "Ran " not in result.stdout, f"--sweep 竟然跑了測試：\n{result.stdout}"
+
+
+@case("收到 SIGTERM 時，解密後的明文會被清掉（可攔截的中止路徑）")
+def _(tmp: Path):
+    if os.name == "nt":
+        return  # Windows 的 terminate() 是 TerminateProcess，不給行程執行處理常式
+    import signal as _signal
+    import time as _time
+
+    repo = make_repo(tmp)
+    # 讓測試指令卡住，才有時間在它還活著的時候送訊號。
+    token = seal(repo, test_command='{python} -c "import time; time.sleep(60)"')
+    vault_dir = Path(manifest_of(repo)["tasks"]["T1"]["vault_dir"])
+
+    env = {**os.environ, "CLAUDE_PROJECT_DIR": str(repo)}
+    env.pop("HARNESS_HIDDEN_DIR", None)
+    child = subprocess.Popen(
+        [sys.executable, str(RUN), "--task-id", "T1", "--token", token],
+        cwd=str(repo), env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, encoding="utf-8", errors="replace",
+    )
+    try:
+        deadline = _time.time() + 30
+        while _time.time() < deadline and not list(vault_dir.glob(".run-*")):
+            _time.sleep(0.05)
+        assert list(vault_dir.glob(".run-*")), "解密目錄一直沒有出現，測不到中止清理"
+
+        child.send_signal(_signal.SIGTERM)
+        child.communicate(timeout=30)
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.communicate()
+
+    leftovers = list(vault_dir.glob(".run-*"))
+    assert not leftovers, f"SIGTERM 之後明文仍留在封存庫：{leftovers}"
+
+
+# ------------------------------------------- 權杖遺失：作廢重來，而不是留救援後門
+
+
+@case("權杖遺失後作廢：密文被刪、manifest 留下墓碑")
+def _(tmp: Path):
+    repo = make_repo(tmp)
+    seal(repo)
+    task_dir = Path(manifest_of(repo)["tasks"]["T1"]["task_dir"])
+    assert task_dir.is_dir()
+
+    result = run_script(DISCARD, repo, "--task-id", "T1", "--token-lost", "--confirm")
+    assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
+    assert not task_dir.exists(), "密文沒有被刪掉"
+
+    entry = manifest_of(repo)["tasks"]["T1"]
+    assert entry["status"] == "discarded", entry
+    assert entry["reason"] == "token-lost", entry
+    assert entry["discard_count"] == 1, entry
+    assert entry["previous"]["file_count"] == 1, entry
+
+
+@case("作廢需要 --token-lost 與 --confirm 兩個旗標，缺一就什麼都不動")
+def _(tmp: Path):
+    repo = make_repo(tmp)
+    seal(repo)
+    task_dir = Path(manifest_of(repo)["tasks"]["T1"]["task_dir"])
+
+    for args in (("--token-lost",), ("--confirm",), ()):
+        result = run_script(DISCARD, repo, "--task-id", "T1", *args)
+        assert result.returncode == 2, f"旗標 {args} 竟然不是參數錯誤：{result.stdout}"
+        assert task_dir.is_dir(), f"旗標 {args} 沒給齊卻已經把密文刪了"
+        assert manifest_of(repo)["tasks"]["T1"].get("status") != "discarded", args
+
+
+@case("權杖其實是對的時候，拒絕作廢（救「只是打錯字」這種情況）")
+def _(tmp: Path):
+    repo = make_repo(tmp)
+    token = seal(repo)
+    task_dir = Path(manifest_of(repo)["tasks"]["T1"]["task_dir"])
+
+    result = run_script(DISCARD, repo, "--task-id", "T1", "--token", token,
+                        "--token-lost", "--confirm")
+    assert result.returncode == 1, f"對的權杖竟然照樣作廢：{result.stdout}"
+    assert task_dir.is_dir(), "對的權杖竟然把密文刪了"
+    assert manifest_of(repo)["tasks"]["T1"].get("status") != "discarded"
+
+
+@case("作廢後 runner 拒絕執行，而且不必先給權杖就看得到重寫指引")
+def _(tmp: Path):
+    repo = make_repo(tmp)
+    seal(repo)
+    run_script(DISCARD, repo, "--task-id", "T1", "--token-lost", "--confirm")
+
+    # 權杖遺失的人拿不出權杖，所以這個訊息不能要求先給 --token。
+    result = run_script(RUN, repo, "--task-id", "T1")
+    assert result.returncode == 2, f"{result.stdout}\n{result.stderr}"
+    assert "已經被作廢" in result.stderr, result.stderr
+    assert "seal-hidden-tests.py" in result.stderr, "沒有指出重寫後怎麼回到流程"
+
+
+@case("作廢後重新封存：嘗試次數與作廢次數都帶進簽過章的新項目，歷史洗不白")
+def _(tmp: Path):
+    repo = make_repo(tmp)
+    token = seal(repo)
+
+    # 先讓 runner 記一筆失敗，製造「有嘗試紀錄」的狀態。
+    (repo / "impl.py").write_text("def double(n):\n    return 0\n", encoding="utf-8")
+    failed = run_script(RUN, repo, "--task-id", "T1", "--token", token)
+    assert failed.returncode == 1, f"{failed.stdout}\n{failed.stderr}"
+    recorded = manifest_of(repo)["tasks"]["T1"]["attempts_recorded"]
+    assert recorded == 1, recorded
+
+    run_script(DISCARD, repo, "--task-id", "T1", "--token-lost", "--confirm")
+
+    # 重寫一份隱藏測試再封存（實務上是重新派工 verifier-test-writer）。
+    (repo / "impl.py").write_text("def double(n):\n    return n * 2\n", encoding="utf-8")
+    (repo / "tests" / "hidden").mkdir(parents=True, exist_ok=True)
+    (repo / "tests" / "hidden" / "test_hidden.py").write_text(PASSING_TEST, encoding="utf-8")
+    new_token = seal(repo)
+
+    entry = manifest_of(repo)["tasks"]["T1"]
+    assert entry.get("status") != "discarded", entry
+    assert entry["discard_count"] == 1, f"作廢次數沒有帶過來：{entry}"
+    assert entry["attempts_recorded"] == recorded, f"嘗試筆數沒有帶過來：{entry}"
+
+    # 簽章要涵蓋這兩個欄位：改掉任何一個，runner 都要驗不過。
+    import hidden_vault as _vault
+    assert _vault.verify_entry(entry, new_token), "重新封存後的項目簽章驗不過"
+    tampered = dict(entry)
+    tampered["discard_count"] = 0
+    assert not _vault.verify_entry(tampered, new_token), "作廢次數被改掉卻驗得過"
+
+    ok = run_script(RUN, repo, "--task-id", "T1", "--token", new_token)
+    assert ok.returncode == 0, f"重新封存後跑不起來：{ok.stdout}\n{ok.stderr}"
+
+
+@case("已經是墓碑的 task 不會被重複作廢（討回一個明確的拒絕，而不是靜默成功）")
+def _(tmp: Path):
+    repo = make_repo(tmp)
+    seal(repo)
+    run_script(DISCARD, repo, "--task-id", "T1", "--token-lost", "--confirm")
+
+    again = run_script(DISCARD, repo, "--task-id", "T1", "--token-lost", "--confirm")
+    assert again.returncode == 1, f"{again.stdout}\n{again.stderr}"
+    assert manifest_of(repo)["tasks"]["T1"]["discard_count"] == 1, "重複作廢把次數又加了一次"
+
+
+@case("--list 會把墓碑與「曾經作廢過」的歷史列出來")
+def _(tmp: Path):
+    repo = make_repo(tmp)
+    seal(repo)
+    run_script(DISCARD, repo, "--task-id", "T1", "--token-lost", "--confirm")
+
+    listed = run_script(RUN, repo, "--list")
+    assert listed.returncode == 0, listed.stderr
+    assert "已作廢" in listed.stdout, listed.stdout
+
+    (repo / "tests" / "hidden").mkdir(parents=True, exist_ok=True)
+    (repo / "tests" / "hidden" / "test_hidden.py").write_text(PASSING_TEST, encoding="utf-8")
+    seal(repo)
+    listed_again = run_script(RUN, repo, "--list")
+    assert "曾因權杖遺失作廢過 1 次" in listed_again.stdout, listed_again.stdout
+
 
 
 def main() -> int:

@@ -184,6 +184,17 @@ python3 scripts/seal-hidden-tests.py --task-id T-001
    `test_command`，它也會拒絕（簽章不符）——**沒有救援路徑是刻意的**，
    權杖遺失只能重寫一份隱藏測試再封存一次。留後門等於留繞過方式。
 
+   「遺失」在實務上最常見的原因不是打錯字，是**執行測試時撞到用量上限，
+   握有權杖的 session 被回收**。那時候不要對著解不開的密文反覆試，
+   走作廢重來的流程（見 §7 與 `docs/implementer-verifier-workflow.md`）：
+
+   ```bash
+   python3 scripts/discard-sealed-task.py --task-id T-001 --token-lost --confirm
+   ```
+
+   它會刪掉再也用不到的密文、在 manifest 留下一塊墓碑，然後告訴你怎麼重寫。
+   作廢**不會**把歷史洗白：重新封存時作廢次數會進到簽過章的新項目裡。
+
 > **在 Claude Code 裡跑會被擋，在一般終端機不會。**
 > `guard-hidden-tests.py` 是 Claude Code 的 PreToolUse hook，只在 Claude Code
 > 呼叫工具時生效。所以上面這些「指令字串裡有暫存區路徑」的操作，
@@ -221,7 +232,8 @@ python3 scripts/seal-hidden-tests.py --task-id T-001
 | 每次都說環境指紋不符 | 真的換機器了 | 確認後 `python3 scripts/env-guard.py --update`。容器/CI 的隨機主機名**不會**造成誤報，所以它一響就代表真的變了 |
 | Windows 主控台印中文崩潰 | 舊版問題 | 現在所有腳本啟動時會自己切 UTF-8，不必設 `PYTHONUTF8`。仍有問題請確認 Python ≥ 3.9 |
 | 連接埠建議是「無法給出」 | 掃描不完整 | `pip install psutil` 後重掃；在那之前人工確認，不要猜 |
-| 權杖弄丟了 | 沒有救援路徑（刻意） | 重寫一份隱藏測試再封存一次 |
+| 權杖弄丟了（最常見：執行測試時撞到用量上限，session 被回收） | 沒有救援路徑（刻意） | `python3 scripts/discard-sealed-task.py --task-id <id> --token-lost --confirm` 作廢，再依同一份 task-spec 重寫一份隱藏測試重新封存 |
+| session 開頭出現「清掉了 N 個先前留下的解密目錄」 | 上一次執行是被強制中斷的（撞上限、被 kill），明文從那時起一直留在磁碟上 | 已經自動清掉了。把這件事寫進驗收報告；明文當時落在封存庫裡，是 guard 擋得住的路徑 |
 | 想用中文當 `task_id` | 在 `LC_ALL=C` 這類 locale 下，非 ASCII 參數在作業系統層就編不出去 | `task_id` 用 `T-001` 這種形式，中文寫在 task-spec 標題裡 |
 
 ---

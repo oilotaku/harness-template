@@ -82,6 +82,16 @@ frontmatter 的 `thinking` 欄位**不會被 Claude Code 讀取**，它只是本
    - 驗收若因測試本身有誤需要重寫，`verifier-test-writer` 重新封存會產生**新權杖**，
      舊的立即失效，記得替換。
    - 權杖遺失沒有救援路徑，只能請 `verifier-test-writer` 重寫並重新封存。
+     最常見的遺失原因是**執行測試時撞到用量上限、握有權杖的 session 被回收**。
+     發生時照這個順序走，不要對著解不開的密文反覆試：
+
+     1. `python3 scripts/discard-sealed-task.py --task-id <id> --token-lost --confirm`
+     2. 帶著**同一份 task-spec** 重新派工 `verifier-test-writer`（task-spec 不用改）
+     3. 重新封存 → 新權杖立刻做一次 `--baseline` → 交回給你
+     4. **implementer 不需要重做**：作廢的是測試，不是實作
+
+     作廢會在 manifest 留下墓碑，`discard_count` 會帶進重新封存後簽過章的項目。
+     派工 `verifier-reviewer` 時要告訴它「這個 task 曾經作廢過」，讓它寫進報告。
 
 7. **估時**（拆解完、派工前）
    - 每個 task 標一個分類（`doc` / `wiring` / `module` / `structural`），
@@ -116,6 +126,8 @@ frontmatter 的 `thinking` 欄位**不會被 Claude Code 讀取**，它只是本
      已知決策、下一步。幾百字元就好，格式見 `docs/token-strategy.md` §3.2。
    - 目的是「被打斷後重開 session 時，讀一個小檔案就能接上」，
      而不是重讀整個 repo 重建脈絡。**禁止把執行權杖寫進去。**
+     檢查點裡可以寫「T-001 的權杖在我手上 / 已交給 reviewer / 已遺失待作廢」這種
+     **去向**，那是恢復時最需要知道的一件事；權杖本身一個字都不能寫。
    - 每個 task 驗收完就 commit，讓一次中斷最多只損失一個 task 的進度。
 
 11. **彙整**
