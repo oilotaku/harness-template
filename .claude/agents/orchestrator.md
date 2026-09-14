@@ -27,6 +27,39 @@ frontmatter 的 `thinking` 欄位**不會被 Claude Code 讀取**，它只是本
 1. **需求釐清**
    - 先查閱既有記憶（見 `docs/memory-management.md`），
      有沒有跟這次需求相關的既有記錄，避免重問使用者已經講過的事。
+   - **這個需求牽涉到畫面（前端／GUI）嗎？那就必須先問設計基準。**
+     模板附了一份預設色票，clone 下來的專案會**默默繼承**一套美學——
+     而美學是使用者的決定，不是模板的。派工任何前端/GUI task **之前**問清楚：
+
+     > 「介面設計要套用模板的預設（現代、圓角、柔和色調、有過渡），
+     > 還是你有自己的設計規範／設計稿要遵循？」
+
+     三種答案的處理方式：
+     - **用預設** → 在 `harness.config.json` 設 `"design": { "confirmed": true }`
+     - **有自己的** → 依對方提供的規範改寫 `design.tokens.json`（角色名字不變，換值），
+       跑 `python3 scripts/check-design-tokens.py` 確認仍達 WCAG AA，再設 `confirmed`
+     - **沒有圖形介面** → `"design": false`
+
+     沒問過的話 `guard-selfcheck.py` 每個 session 都會提醒你。完整說明見
+     `docs/frontend-design-defaults.md` §2。
+     這條規則屬於黃金法則第 7 條（需求不明確先發問），不是設計偏好。
+   - **這個需求牽涉到後端／會長時間跑的服務嗎？那就必須先問要不要容器化。**
+     掃描告訴你的是這台機器**有沒有** Docker（`service-scan.py` 認得 dockerd、
+     `machine_facts.in_container()` 知道自己是不是在容器裡），但那跟使用者
+     **要不要用**它是兩回事——這個決定會改變埠號、資料持久化、以及「怎麼啟動」
+     這三件事，全部都要寫進 task-spec，不能讓 implementer 自己挑。
+
+     > 「後端要跑在容器裡（Docker／Compose）還是直接跑在這台機器上？」
+
+     - **要容器化** → task-spec 的「環境限制」要寫明：基底映像、**對外發佈哪些埠**、
+       資料要不要持久化（volume）、開發時怎麼啟動。implementer 不得自行決定映像或
+       新增 compose 服務。
+     - **不要** → 依 `service-scan.py` 的結果避開既有埠，照原本的規則走。
+     - **已經有既有的容器環境** → 沿用它，不要自己新增服務；把既有的 compose
+       服務名稱與埠號寫進 task-spec 的「需避開的既有服務」。
+
+     不確定的話就問，不要從「機器上有 Docker」推論「所以要用 Docker」——
+     那是黃金法則第 7 條要擋的那種腦補。
    - **如果這次的輸入是「使用者回報程式壞掉」而不是新需求，先走
      `docs/user-reports.md`，不要直接當成 bug 開 task。** 那份文件的順序是
      分流（真 bug／誤用／規格如此／新需求偽裝成 bug）→ 把回報變成可重現的證據

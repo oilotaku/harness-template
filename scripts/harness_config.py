@@ -23,12 +23,22 @@ JS 常見 `__tests__/` 或 `*.spec.ts`）。使用者一旦照自己語言的慣
   "public_test_paths": ["tests/public"],
   "hidden_test_paths": ["tests/hidden"],
   "hidden_test_command": "{python} -m unittest discover -s {dir} -p 'test_*.py' -v",
-  "version": { "file": "VERSION", "format": "plain" }
+  "version": { "file": "VERSION", "format": "plain" },
+  "design": { "tokens": "design.tokens.json" }
 }
 ```
 
 沒有這個檔案時退回上面那組預設值（Python 專案不必特別設定）。
 路徑支援 `*` 萬用字元（例如 monorepo 的 `packages/*/tests/hidden`）。
+
+## `design`：前端／GUI 的設計基準
+
+`implementer-frontend` 要決定顏色、間距、字級——這些決定**不做也得做**，
+所以規格沒寫的時候它一定會自己發明一套，於是每個 task 各有一套、跨畫面就漂了。
+
+`design.tokens` 指向一份技術棧中立的 token 檔（角色命名，不是色階命名），
+讓實作者照著用而不是自己想。沒有圖形介面的專案設 `"design": false` 關掉檢查。
+細節見 `scripts/design_tokens.py` 與 `docs/frontend-design-defaults.md`。
 
 ## `version`：產出的程式自己的版本號
 
@@ -302,6 +312,45 @@ def _validate_mirrors(value) -> list:
     return mirrors
 
 
+def _validate_design(value):
+    """驗證 `design` 區塊：設計 token 的位置（前端／GUI 共用的顏色、間距、字級基準）。
+
+    `false` 代表這個專案沒有圖形介面——CLI 與函式庫不該被逼著維護一份用不到的色票。
+    """
+    if value is None:
+        return None
+    if value is False:
+        return False
+    if not isinstance(value, dict):
+        raise ConfigError(
+            f"`design` 必須是物件或 false（目前是 {type(value).__name__}）。"
+        )
+
+    known = {"tokens", "confirmed"}
+    unknown = [k for k in value if k not in known and not k.startswith("$")]
+    if unknown:
+        raise ConfigError(
+            f"`design` 有無法辨識的欄位：{unknown}。可用欄位：{sorted(known)}。"
+        )
+
+    confirmed = value.get("confirmed", False)
+    if not isinstance(confirmed, bool):
+        raise ConfigError(
+            f"`design.confirmed` 必須是 true 或 false（目前是 {type(confirmed).__name__}）。"
+        )
+
+    target = value.get("tokens", "design.tokens.json")
+    if not isinstance(target, str) or not target.strip():
+        raise ConfigError("`design.tokens` 必須是非空字串。")
+    normalized = target.strip().replace("\\", "/").strip("/")
+    if not normalized or normalized == "." or normalized.startswith(".."):
+        raise ConfigError(f"`design.tokens` 的「{target}」不是 repo 內的相對路徑。")
+    if Path(normalized).is_absolute():
+        raise ConfigError(f"`design.tokens` 的「{target}」必須是相對於 repo 根目錄的路徑。")
+
+    return {"tokens": normalized, "confirmed": confirmed}
+
+
 def load(root: Path = None) -> dict:
     """讀取設定；沒有設定檔時回傳預設值。設定檔有問題時丟 ConfigError。"""
     root = root or repo_root()
@@ -320,6 +369,7 @@ def load(root: Path = None) -> dict:
             "mirrors": [],
             "archive": None,
         },
+        "design": None,
         "_source": "預設值（沒有 harness.config.json）",
     }
 
@@ -334,7 +384,7 @@ def load(root: Path = None) -> dict:
     if not isinstance(raw, dict):
         raise ConfigError(f"{CONFIG_FILENAME} 的最外層必須是物件（{{...}}）。")
 
-    known = set(PATH_KEYS) | {"hidden_test_command", "version"}
+    known = set(PATH_KEYS) | {"hidden_test_command", "version", "design"}
     unknown = [key for key in raw if key not in known and not key.startswith("$")]
     if unknown:
         raise ConfigError(
@@ -360,6 +410,9 @@ def load(root: Path = None) -> dict:
 
     if "version" in raw:
         config["version"] = _validate_version(raw["version"])
+
+    if "design" in raw:
+        config["design"] = _validate_design(raw["design"])
 
     config["_source"] = str(path)
     return config
