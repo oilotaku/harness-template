@@ -90,6 +90,29 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 # 這件事在封存版（第三輪 P0-8 (a)）特別容易發生：封存庫裡少一個 .py，
 # import 就會在任何檢查之前炸掉。這個案例是 test-vault.py 的
 # 「封存版程式碼遺失也要擋下」當場抓出來的。
+def _force_utf8() -> None:
+    """印任何中文之前先把 stdout/stderr 切成 UTF-8。
+
+    這段**刻意內嵌**而不是 `import utf8_output` 來做：下面那個 try 正是在處理
+    「封存版的相依模組不見了」，而 `utf8_output` 自己就是那五個檔案之一。
+    靠 import 它來讓錯誤訊息可讀，訊息就會在最需要它的那一次失效。
+
+    第三輪實測（CI 的 cp1252 步驟抓到）：沒有這一段時，`PYTHONIOENCODING=cp1252`
+    下整段中文會變成 `\\u96b1\\u85cf...` 一串逸出字元——exit code 還是對的，
+    但讀的人看不懂發生什麼事。這跟第一輪 P3-3 修掉的是同一類問題。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            pass
+
+
+_force_utf8()
+
 try:
     import attempts  # noqa: E402
     import hidden_vault as vault  # noqa: E402

@@ -847,6 +847,27 @@ def _(tmp: Path):
     sealed_runner.write_bytes(keep)
 
 
+@case("封存版檔案不完整時，訊息在舊代碼頁主控台下仍然讀得懂")
+def _(tmp: Path):
+    # 第三輪實測（CI 的 cp1252 步驟抓到）：這段錯誤訊息印在 utf8_output.enable()
+    # **之前**——而 enable 正好在那個剛失敗的 try 裡。於是中文全變成 \uXXXX，
+    # exit code 還是對的，但讀的人看不懂發生什麼事。修法是內嵌一份 UTF-8 切換，
+    # 不靠 import（utf8_output 自己就是可能不見的那五個檔案之一）。
+    repo = make_repo(tmp)
+    token = seal(repo)
+    import hidden_vault as _vault
+
+    runner = _vault.runner_dir(Path(manifest_of(repo)["tasks"]["T1"]["vault_dir"]))
+    (runner / "attempts.py").unlink()
+    result = run_script(
+        runner / "run-hidden-tests.py", repo, "--task-id", "T1", "--token", token,
+        extra_env={"PYTHONIOENCODING": "cp1252", "LC_ALL": "C", "LANG": "C"},
+    )
+    assert result.returncode == 2, f"{result.stdout}\n{result.stderr}"
+    assert "不完整" in result.stderr, f"訊息在舊代碼頁下變成不可讀：{result.stderr}"
+    assert "\\u" not in result.stderr, f"訊息被逸出成 \\uXXXX：{result.stderr}"
+
+
 @case("repo 副本與封存版不一致時擋下，並指出封存版的路徑")
 def _(tmp: Path):
     repo = make_repo_with_scripts(tmp)

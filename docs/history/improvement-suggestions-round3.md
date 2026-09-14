@@ -75,7 +75,30 @@
 這是第二輪 P2-9（字面大括號讓 runner 以 traceback 結束、exit 1）的同一個形狀，
 只是換了一個觸發點——**任何讓 runner 非預期結束的路徑都要先確認它的 exit code**。
 
-回歸測試：384 → **426 案例**（guards 90→98、vault 57→68、env-guard 16→19）。
+### 然後 CI 又抓到那個修法自己的 bug
+
+上面那段修法在本機（Python 3.11／3.13、UTF-8 主控台）四種組合都綠，推上去之後
+**ubuntu 與 windows 四個 job 立刻紅，macOS 兩個全綠**。
+
+原因：新的錯誤訊息印在 `utf8_output.enable()` **之前**——而 `enable` 正好在那個
+剛失敗的 try 裡面。於是在舊代碼頁的主控台下（Windows 的預設、Linux 的
+`PYTHONIOENCODING=cp1252` 重跑步驟），整段中文被 Python 的 stderr 預設錯誤處理器
+轉成 `\u96b1\u85cf...` 一串逸出字元。exit code 是對的（2），但**訊息在最需要它的
+那一次變成不可讀**。macOS 因為預設就是 UTF-8 所以看不出來。
+
+這是第一輪 P3-3 修掉的同一類問題（所有腳本都印中文，Windows 預設用 ANSI 代碼頁）
+在一個新位置重演。修法沿用 `guard-hidden-tests.py` 當初的取捨：**內嵌**一份
+UTF-8 切換，不 `import utf8_output`——因為 `utf8_output` 自己就是那五個可能不見的
+檔案之一，靠它來讓錯誤訊息可讀，訊息就會在最需要它的那一次失效。
+
+回歸測試補了一條專門守這件事的案例：用 `PYTHONIOENCODING=cp1252` 執行，斷言
+訊息裡讀得到「不完整」而且**不含 `\u` 逸出**。
+
+> 這一輪第二次由 CI 抓到「本機全綠但平台相關」的 bug。值得記下來的是兩次的形狀
+> 一樣：**只要有一段中文在 `utf8_output.enable()` 之前被印出來，它就會在舊代碼頁
+> 下失效**，而本機的 UTF-8 環境永遠看不到。
+
+回歸測試：384 → **427 案例**（guards 90→98、vault 57→69、env-guard 16→19）。
 
 ---
 
