@@ -260,3 +260,7 @@ session 各自重載 `CLAUDE.md` 與自己的定義檔。那是「獨立驗證�
 閱讀路徑（見 `docs/token-strategy.md` §1）。
 第二輪審視 `docs/history/improvement-suggestions-round2.md`（同樣只給人看）針對第一輪
 引入的新信任根——manifest、鎖定清單、keystream——做了實測，並列出尚未處理的項目。
+第三輪審視 `docs/history/improvement-suggestions-round3.md`（同樣只給人看）問了下一個問題：
+簽章保護的是 runner 信任的**資料**，那 **runner 自己**是誰寫的？結論是強制力的程式碼
+本身 implementer 改得到，**尚未修正**——在那之前，下面「它擋什麼、不擋什麼」那一段
+要連同第三輪 P0-8 一起讀。
