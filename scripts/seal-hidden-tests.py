@@ -233,6 +233,10 @@ def main() -> int:
             }
         )
 
+    # 驗收用的程式碼跟隱藏測試一起封存（第三輪 P0-8 (a)）。放在密文之後、
+    # manifest 之前：複製失敗時還沒寫 manifest，不會留下「指到不存在的 runner」的項目。
+    runner_files = vault.copy_runner(vault_dir, Path(__file__).resolve().parent)
+
     manifest = vault.load_manifest(root)
     previous_version = manifest.get("version")
     previous_entry = manifest.get("tasks", {}).get(args.task_id) or {}
@@ -257,6 +261,10 @@ def main() -> int:
         "files": entries,
         # 封存當下鎖定清單的 sha256。之後清單被刪或被改，runner 都分得出來。
         "locked_tests_sha256": locked_sha,
+        # 第三輪 P0-8 (a)：驗收時會執行的程式碼也一起封存，並把每個檔案的 sha256
+        # 放進簽章範圍。簽章金鑰由權杖推導，implementer 沒有權杖，所以改了封存版
+        # 程式碼就一定對不上——而 repo 裡那一份他改得到，改了也不再是驗收執行的那一份。
+        "runner_files": runner_files,
         # 基線執行（--baseline）之後才會填：證明這份隱藏測試在沒有實作時是紅的。
         "baseline": None,
     }
@@ -295,30 +303,38 @@ def main() -> int:
     for item in entries:
         print(f"  - {item['path']}（{item['bytes']} bytes）")
     print(f"封存位置（repo 之外、內容已加密）：{task_dir}")
+    print(f"驗收用的程式碼也已封存（{len(runner_files)} 個檔案，sha256 已進簽章範圍）：")
+    print(f"  {vault.runner_dir(vault_dir)}")
     print(f"manifest：{vault.manifest_path(root).relative_to(root)}（項目已用權杖簽章）")
     if previous_version not in (None, vault.MANIFEST_VERSION):
         print(f"（manifest 從版本 {previous_version} 升到 {vault.MANIFEST_VERSION}；"
               "舊版本封存的其他 task 沒有簽章，要重新封存才跑得動）")
     print()
     print("工作目錄裡已經沒有隱藏測試的明文。這套機制擋的是「順手看一眼」「習慣性搜整個 repo」")
-    print("這類非刻意的洩題，並讓刻意的繞過留下痕跡（簽章不符、稽核不符）；")
-    print("它不擋一個決心繞過、且跟 verifier 共用同一個 OS 使用者的子智能體——那需要獨立的")
-    print("使用者或容器，超出本模板範圍（見 scripts/hidden_vault.py 模組說明）。")
+    print("這類非刻意的洩題；它不擋一個決心繞過、且跟 verifier 共用同一個 OS 使用者的")
+    print("子智能體——那需要獨立的使用者或容器，超出本模板範圍")
+    print("（見 scripts/hidden_vault.py 模組說明）。")
     print()
     print("=" * 60)
     print(f"執行權杖（只會出現這一次）：{token}")
     print("=" * 60)
     print()
+    sealed_runner = vault.runner_dir(vault_dir) / "run-hidden-tests.py"
     print("接下來：")
     print("  1. 立刻做基線執行，證明這份隱藏測試在沒有實作時是紅的（不計入停損次數）：")
-    print(f"     python3 scripts/run-hidden-tests.py --task-id {args.task_id} --token <權杖> --baseline")
+    print(f'     python3 "{sealed_runner}" --task-id {args.task_id} --token <權杖> --baseline')
     print("  2. 把這串權杖交回 Orchestrator，你自己不要留存。")
     print("  3. Orchestrator 只在派工 verifier-reviewer 時把它放進那個 session。")
     print("  4. 絕對不要寫進 task-spec、公開測試、驗收報告或 commit 訊息，")
     print("     更不要交給任何 implementer——那等於把隱藏測試變成可查詢的 oracle。")
     print()
-    print("verifier-reviewer 驗收時執行：")
-    print(f"  python3 scripts/run-hidden-tests.py --task-id {args.task_id} --token <權杖>")
+    print("verifier-reviewer 驗收時執行（**用這個絕對路徑，不要用 repo 裡那一份**）：")
+    print(f'  python3 "{sealed_runner}" --task-id {args.task_id} --token <權杖>')
+    print()
+    print("為什麼不是 `python3 scripts/run-hidden-tests.py`：repo 裡那一份 implementer")
+    print("改得到——第三輪實測，覆寫它之後用完全正確的權杖驗收會得到 exit 0 與")
+    print("「隱藏測試全部通過」，而三項事後稽核都回報正常。封存版在 repo 之外，")
+    print("而且它的 sha256 在簽過章的 manifest 裡，改了就跑不動。")
     print("===== 結束 =====")
     return 0
 

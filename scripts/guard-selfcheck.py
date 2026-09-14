@@ -372,10 +372,9 @@ def check_audit_scripts() -> bool:
         return False
 
     print("事後稽核自我檢查：verify-locks.py 實跑正常（相符回 0、竄改回 1）。")
-    print("⚠️ 尚未涵蓋：run-hidden-tests.py 與 hidden_vault.py 的完整性本檢查驗不了"
-          "（它們住在 repo 裡，implementer 改得到；見 docs/history/"
-          "improvement-suggestions-round3.md 的 P0-8）。這支腳本自己也一樣——"
-          "誰來驗驗證者是個真的循環，根本解是把驗收用的程式碼一起封存。")
+    print("（run-hidden-tests.py 與 hidden_vault.py 不在這裡驗：驗收跑的是封存庫裡"
+          "那一份，它會自己比對簽過章的 sha256——見第三輪 P0-8 (a)。"
+          "這支腳本自己仍然驗不了，誰來驗驗證者是個真的循環。）")
     return True
 
 

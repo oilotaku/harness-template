@@ -82,9 +82,26 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import attempts  # noqa: E402
-import hidden_vault as vault  # noqa: E402
-import utf8_output  # noqa: E402
+# 相依模組載入失敗一律 exit 2，不能讓它變成 Python 預設的 exit 1——
+# 在這支腳本裡 1 的語意是「有隱藏測試失敗」，而 verifier-reviewer 會照這個語意
+# 判讀。少一個模組跟「測試失敗」是完全不同的兩件事，混為一談會讓一個根本沒跑起來
+# 的驗收被記成一次失敗（還會計入停損次數）。
+#
+# 這件事在封存版（第三輪 P0-8 (a)）特別容易發生：封存庫裡少一個 .py，
+# import 就會在任何檢查之前炸掉。這個案例是 test-vault.py 的
+# 「封存版程式碼遺失也要擋下」當場抓出來的。
+try:
+    import attempts  # noqa: E402
+    import hidden_vault as vault  # noqa: E402
+    import utf8_output  # noqa: E402
+except ImportError as _exc:
+    print(
+        f"隱藏測試無法執行：載入相依模組失敗（{_exc}）。\n"
+        "若你執行的是封存版（<封存庫>/_runner/），代表封存庫裡的檔案不完整——"
+        "這本身就是可疑訊號，請判定驗收不通過並在報告裡記載。",
+        file=sys.stderr,
+    )
+    sys.exit(2)
 
 utf8_output.enable()  # Windows 主控台預設用 ANSI 代碼頁，不先切 UTF-8 會印不出中文
 
@@ -197,6 +214,97 @@ def _record_attempt(manifest: dict, entry: dict, task_id: str, passed: bool, tok
               "檢視 task-spec 是否有問題，而不是再派一輪。")
     for warning in info["warnings"]:
         print(f"⚠️ {warning}")
+
+
+def running_from_vault(info: dict) -> bool:
+    """這支腳本自己是不是封存版那一份。"""
+    try:
+        here = Path(__file__).resolve().parent
+        vault_dir = Path(info.get("vault_dir") or "")
+        return bool(vault_dir) and here == vault.runner_dir(vault_dir).resolve()
+    except (OSError, ValueError):
+        return False
+
+
+def check_runner(info: dict, args):
+    """驗收執行的程式碼是不是封存當下那一份（第三輪 P0-8 (a)）。
+
+    回傳 None 代表可以繼續，否則回傳要用的 exit code。
+
+    兩種情況的意義完全不同，所以分開處理：
+
+      - **正在跑封存版**：比對 `_runner/` 底下每個檔案的 sha256 與簽過章的紀錄。
+        對不上就是「封存之後有人動了封存庫裡的程式碼」——跟簽章不符同一級。
+      - **正在跑 repo 裡那一份**：repo 裡的副本 implementer 改得到，所以它的
+        執行結果**本來就不該被當成驗收依據**。這裡不直接拒絕（`--list`、
+        `--sweep`、以及沒有封存版的舊 task 仍然要跑得動），但會把話講清楚，
+        並在偵測到「repo 副本與封存版不一致」時直接擋下。
+    """
+    recorded = info.get("runner_files")
+    vault_dir = Path(info.get("vault_dir") or "")
+
+    if not recorded:
+        # 舊版封存沒有這個欄位。不強制失敗（那會讓升級 harness 之後所有進行中的
+        # task 全部卡住），但要明講這次驗收少了哪一層保護。
+        print("⚠️ 這個 task 是在「驗收程式碼一起封存」之前封存的，沒有 runner_files 紀錄。")
+        print("   本次執行的程式碼是否被改過**無法驗證**（第三輪 P0-8）。")
+        print("   要拿回這一層保護，請重新封存一次。")
+        return None
+
+    if running_from_vault(info):
+        problems = vault.verify_runner(vault_dir, recorded)
+        if problems:
+            print("===== 隱藏測試無法執行 =====", file=sys.stderr)
+            print("❌ 封存版的驗收程式碼與封存當下記錄的 sha256 不符：", file=sys.stderr)
+            for item in problems:
+                print(f"   - {item}", file=sys.stderr)
+            print(
+                "   簽章金鑰由權杖推導，implementer 沒有權杖，所以這不可能是意外——"
+                "請判定本次驗收不通過並在報告裡明確記載。",
+                file=sys.stderr,
+            )
+            return 2
+        print(f"驗收程式碼：封存版，{len(recorded)} 個檔案的 sha256 與簽章紀錄相符。")
+        return None
+
+    # 跑的是 repo 裡那一份。
+    here = Path(__file__).resolve().parent
+    drifted = [
+        item["name"]
+        for item in recorded
+        if isinstance(item, dict)
+        and item.get("name")
+        and vault.sha256_file(here / item["name"]) != item.get("sha256")
+    ]
+    sealed = vault.runner_dir(vault_dir) / "run-hidden-tests.py" if vault_dir else None
+
+    if drifted:
+        print("===== 隱藏測試無法執行 =====", file=sys.stderr)
+        print(
+            "❌ 你正在執行 repo 裡的驗收程式碼，而它與封存當下那一份**不一致**：",
+            file=sys.stderr,
+        )
+        for name in drifted:
+            print(f"   - scripts/{name}", file=sys.stderr)
+        print(
+            "   repo 裡這幾支 implementer 改得到。第三輪實測：覆寫 run-hidden-tests.py "
+            "之後，用完全正確的權杖驗收會得到 exit 0 與「隱藏測試全部通過」。",
+            file=sys.stderr,
+        )
+        if sealed:
+            print(f"   請改用封存版：python3 \"{sealed}\" --task-id {args.task_id} --token <權杖>",
+                  file=sys.stderr)
+        print(
+            "   若這是因為 harness 本身被正當地更新過（不是被竄改），"
+            "請重新封存這個 task，讓紀錄與程式碼重新對齊。",
+            file=sys.stderr,
+        )
+        return 2
+
+    print("⚠️ 你正在執行 repo 裡的驗收程式碼（目前與封存版一致）。")
+    if sealed:
+        print(f"   驗收請改用封存版，它在 repo 之外、implementer 改不到：\n   {sealed}")
+    return None
 
 
 def check_locked_list(info: dict, root: Path):
@@ -539,6 +647,12 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
+
+    # 第三輪 P0-8 (a)：驗簽之後、執行任何東西之前，確認「正在執行的這份程式碼」
+    # 就是封存當下那一份。兩件事分開判斷，因為它們的意義完全不同。
+    runner_verdict = check_runner(info, args)
+    if runner_verdict is not None:
+        return runner_verdict
 
     lock_problem = check_locked_list(info, root)
     if lock_problem:

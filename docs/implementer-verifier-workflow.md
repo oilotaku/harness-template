@@ -85,11 +85,14 @@
    > 與「隱藏測試全部通過」，權杖同時被送進被改過的程式碼的 argv，而
    > `verify-locks.py` 與 `guard-selfcheck.py --strict` 都回報正常——一個痕跡都沒有。
    >
-   > 第三輪已補上事前層（guard 在這個 repo 封存過 task 之後，擋下對 `scripts/`、
-   > `.claude/`、`CLAUDE.md`、`harness.config.json` 的寫入；讀不擋），但那是縱深防禦：
-   > 拿得到 Bash 的子智能體寫一支腳本去改仍然穿得過去。**根本解是不要執行 repo 裡的
-   > 程式碼**——把驗收用的程式碼一起封存、由封存版執行，見
-   > `docs/history/improvement-suggestions-round3.md` 的 P0-8 (a)，尚未結案。
+   > 第三輪關上了那條路，而關上它的**是派工方式**：驗收用的程式碼連同隱藏測試一起
+   > 封存到 `<封存庫>/_runner/`，每個檔案的 sha256 進簽章範圍，Orchestrator 給
+   > `verifier-reviewer` 的是那個絕對路徑。改 repo 裡的副本不影響驗收；改封存版的
+   > 相依模組會 exit 2。事前層（guard 擋強制力本體的寫入）是額外的一道，不是主防線。
+   >
+   > 仍然不擋：換掉封存版的 `run-hidden-tests.py` **自己**、而且把自我比對拿掉——
+   > 任何自我檢查都有這個循環。細節見
+   > `docs/history/improvement-suggestions-round3.md` 的 P0-8。
 4. **獨立驗證鏈**：`verifier-reviewer` 與 `implementer-*` 是不同 session，
    不共用上下文，驗收時是「從零重新審視」而不是延續實作者的思路
    （對應 SE-CoVe 獨立驗證鏈的精神）。

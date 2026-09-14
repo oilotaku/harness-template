@@ -18,6 +18,7 @@
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -746,6 +747,131 @@ def _(tmp: Path):
     assert entry["reason"] == "token-lost", entry
     assert entry["discard_count"] == 1, entry
     assert entry["previous"]["file_count"] == 1, entry
+
+
+def make_repo_with_scripts(tmp: Path, hidden_source: str = PASSING_TEST) -> Path:
+    """連 `scripts/` 一起複製的 repo。
+
+    一般案例用 `make_repo`，封存時 seal 會從**真正的** scripts 目錄複製驗收程式碼，
+    那對大多數斷言都沒差。但要測「implementer 改掉 repo 裡的副本會怎樣」就不行了——
+    那得改到一份可丟棄的副本，不能動到這個 repo 自己的腳本。
+    """
+    repo = make_repo(tmp, hidden_source)
+    shutil.copytree(SCRIPTS_DIR, repo / "scripts", ignore=shutil.ignore_patterns("__pycache__"))
+    return repo
+
+
+@case("封存會把驗收用的程式碼一起封存，並把每個檔案的 sha256 簽進 manifest")
+def _(tmp: Path):
+    repo = make_repo(tmp)
+    token = seal(repo)
+    import hidden_vault as _vault
+
+    entry = manifest_of(repo)["tasks"]["T1"]
+    names = {item["name"] for item in entry["runner_files"]}
+    assert names == set(_vault.RUNNER_FILES), names
+
+    runner = _vault.runner_dir(Path(entry["vault_dir"]))
+    assert (runner / "run-hidden-tests.py").is_file(), "封存版 runner 不存在"
+    # sha256 必須在簽章範圍內，否則改了封存版程式碼也能連帶改紀錄
+    tampered = dict(entry)
+    tampered["runner_files"] = [{"name": "run-hidden-tests.py", "sha256": "0" * 64}]
+    assert not _vault.verify_entry(tampered, token), "runner_files 被改掉卻驗得過"
+
+
+@case("用封存版執行：自我比對通過，行為與 repo 版一致")
+def _(tmp: Path):
+    repo = make_repo(tmp, FAILING_TEST)
+    token = seal(repo)
+    import hidden_vault as _vault
+
+    sealed = _vault.runner_dir(Path(manifest_of(repo)["tasks"]["T1"]["vault_dir"]))
+    result = run_script(sealed / "run-hidden-tests.py", repo, "--task-id", "T1", "--token", token)
+    assert result.returncode == 1, f"{result.stdout}\n{result.stderr}"
+    assert "封存版" in result.stdout, result.stdout
+
+
+@case("改掉 repo 裡的 runner，封存版的驗收結果不受影響（P0-8 (a) 的重點）")
+def _(tmp: Path):
+    # 第三輪 P0-8 實測：覆寫 scripts/run-hidden-tests.py 之後，用完全正確的權杖
+    # 驗收會得到 exit 0 與「隱藏測試全部通過」，而三項事後稽核都回報正常。
+    repo = make_repo_with_scripts(tmp, FAILING_TEST)
+    result = run_script(repo / "scripts" / "seal-hidden-tests.py", repo, "--task-id", "T1")
+    assert result.returncode == 0, result.stdout
+    token = next(
+        line.split("：", 1)[1].strip()
+        for line in result.stdout.splitlines()
+        if line.startswith("執行權杖")
+    )
+    import hidden_vault as _vault
+
+    sealed = _vault.runner_dir(Path(manifest_of(repo)["tasks"]["T1"]["vault_dir"]))
+    (repo / "scripts" / "run-hidden-tests.py").write_text(
+        "import sys\nprint('狀態：隱藏測試全部通過。')\nsys.exit(0)\n", encoding="utf-8"
+    )
+    result = run_script(sealed / "run-hidden-tests.py", repo, "--task-id", "T1", "--token", token)
+    assert result.returncode == 1, f"封存版被 repo 的假 runner 影響了：{result.stdout}"
+    # 注意不能只查「全部通過」——「未全部通過」含有同一段字。
+    assert "狀態：隱藏測試全部通過" not in result.stdout, result.stdout
+    assert "未全部通過" in result.stdout, result.stdout
+
+
+@case("改掉封存版的相依模組：沒有權杖就簽不出新 sha256，直接擋下")
+def _(tmp: Path):
+    repo = make_repo(tmp)
+    token = seal(repo)
+    import hidden_vault as _vault
+
+    runner = _vault.runner_dir(Path(manifest_of(repo)["tasks"]["T1"]["vault_dir"]))
+    (runner / "attempts.py").write_text("def record(*a, **k): pass\n", encoding="utf-8")
+    result = run_script(runner / "run-hidden-tests.py", repo, "--task-id", "T1", "--token", token)
+    assert result.returncode == 2, f"{result.stdout}\n{result.stderr}"
+    assert "被竄改" in result.stderr, result.stderr
+
+
+@case("封存版程式碼遺失也要擋下（不是只有內容被改才算）")
+def _(tmp: Path):
+    repo = make_repo(tmp)
+    token = seal(repo)
+    import hidden_vault as _vault
+
+    runner = _vault.runner_dir(Path(manifest_of(repo)["tasks"]["T1"]["vault_dir"]))
+    sealed_runner = runner / "run-hidden-tests.py"
+    keep = sealed_runner.read_bytes()
+    (runner / "attempts.py").unlink()
+    result = run_script(sealed_runner, repo, "--task-id", "T1", "--token", token)
+    # exit 2（無法執行），**不是** 1——1 在這支腳本裡的語意是「有隱藏測試失敗」，
+    # 而 verifier-reviewer 會照那個語意判讀，還會計入停損次數。
+    assert result.returncode == 2, f"{result.stdout}\n{result.stderr}"
+    assert "不完整" in result.stderr or "遺失" in result.stderr, result.stderr
+    sealed_runner.write_bytes(keep)
+
+
+@case("repo 副本與封存版不一致時擋下，並指出封存版的路徑")
+def _(tmp: Path):
+    repo = make_repo_with_scripts(tmp)
+    result = run_script(repo / "scripts" / "seal-hidden-tests.py", repo, "--task-id", "T1")
+    assert result.returncode == 0, result.stdout
+    token = next(
+        line.split("：", 1)[1].strip()
+        for line in result.stdout.splitlines()
+        if line.startswith("執行權杖")
+    )
+    (repo / "scripts" / "attempts.py").write_text("# drifted\n", encoding="utf-8")
+    result = run_script(repo / "scripts" / "run-hidden-tests.py", repo,
+                        "--task-id", "T1", "--token", token)
+    assert result.returncode == 2, f"{result.stdout}\n{result.stderr}"
+    assert "不一致" in result.stderr, result.stderr
+    assert "_runner" in result.stderr, f"沒有指出封存版路徑：{result.stderr}"
+
+
+@case("repo 副本沒被動過時仍可執行，但要提醒驗收該用封存版")
+def _(tmp: Path):
+    repo = make_repo(tmp)
+    token = seal(repo)
+    result = run_script(RUN, repo, "--task-id", "T1", "--token", token)
+    assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
+    assert "repo 裡的驗收程式碼" in result.stdout, result.stdout
 
 
 @case("作廢會清掉殘留的明文，只把密文留進作廢區")

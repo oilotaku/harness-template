@@ -45,9 +45,11 @@ P0-6 / P0-7 / P1-5 / P2-9（manifest 版本 2）。
 這裡原本還寫著「並讓刻意的繞過留下痕跡（簽章不符、稽核不符）」。第三輪實測證否了
 那句話：**簽章保護的是這支模組產出的資料，不是讀它的那支程式**。改寫
 `run-hidden-tests.py`（或這個檔案本身）就能讓驗收 exit 0 並印「全部通過」，
-簽章完好、稽核乾淨。第三輪補上的事前層只是縱深防禦（Bash 仍穿得過去）；
-根本解是把驗收用的程式碼一起封存、由封存版執行——見
-`docs/history/improvement-suggestions-round3.md` 的 P0-8 (a)，尚未結案。
+簽章完好、稽核乾淨。
+
+第三輪的解是把層次再推一層（見下面 RUNNER_FILES）：驗收用的程式碼也封存，
+sha256 也進簽章範圍，而驗收跑的是封存庫裡那一份。殘留限制寫在 `verify_runner()`
+的說明裡，沒有粉飾。
 """
 import hashlib
 import hmac
@@ -171,6 +173,84 @@ def resolve_vault_dir(root: Path = None) -> Path:
 
 SEALED_LOG_NAME = "_sealed.log"
 DISCARDED_DIR_NAME = "_discarded"
+
+# 第三輪 P0-8 (a)：驗收時會執行的程式碼，連同隱藏測試一起封存。
+#
+# 前兩輪把信任根一路往外推——第一輪把隱藏測試的**明文**搬出工作目錄，
+# 第二輪把 runner 信任的**資料**（manifest 欄位、鎖定清單 sha256）簽章。
+# 但沒有問下一個問題：**runner 自己是誰寫的**。答案是：一個 implementer 用
+# Write 工具就能覆寫的檔案。第三輪實測：覆寫 `scripts/run-hidden-tests.py`
+# 之後，用完全正確的權杖執行驗收會得到 exit 0 與「隱藏測試全部通過」，
+# 權杖同時被送進被改過的程式碼的 argv，而三項事後稽核全部回報正常。
+#
+# 這裡列的是 run-hidden-tests.py 的**相依閉包**（它自己 + 它 import 的四個模組）。
+# 少一個，封存版就會去 import repo 裡那一份，等於留了一條後門；
+# 多一個沒有壞處，只是多複製幾 KB。
+RUNNER_DIR_NAME = "_runner"
+RUNNER_FILES = (
+    "run-hidden-tests.py",
+    "hidden_vault.py",
+    "harness_config.py",
+    "attempts.py",
+    "utf8_output.py",
+)
+
+
+def runner_dir(vault: Path) -> Path:
+    return vault / RUNNER_DIR_NAME
+
+
+def copy_runner(vault: Path, scripts_dir: Path) -> list:
+    """把驗收用的程式碼複製進封存庫，回傳 `[{"name", "sha256"}]`（供簽章）。
+
+    複製到**封存庫**而不是 task 目錄底下：同一個封存庫的多個 task 共用一份，
+    重新封存時原地覆蓋。每個 task 的 manifest 各自記下當下的 sha256，
+    所以「這個 task 封存當下的 runner 是哪一份」仍然是逐 task 追蹤的。
+    """
+    target = runner_dir(vault)
+    target.mkdir(parents=True, exist_ok=True)
+    recorded = []
+    for name in RUNNER_FILES:
+        source = scripts_dir / name
+        if not source.is_file():
+            raise FileNotFoundError(f"找不到要封存的驗收程式碼：{source}")
+        data = source.read_bytes()
+        (target / name).write_bytes(data)
+        recorded.append({"name": name, "sha256": sha256_bytes(data)})
+    return recorded
+
+
+def verify_runner(vault: Path, recorded) -> list:
+    """比對封存版程式碼與**簽過章的** manifest 紀錄，回傳問題描述清單（空的代表相符）。
+
+    這一步擋的是「封存之後有人動了封存庫裡的那份程式碼」。攻擊者沒有權杖就
+    簽不出有效的 `runner_files`，所以改了必然對不上。
+
+    **這不是萬能的**，而且理由要寫清楚：如果被換掉的是
+    `_runner/run-hidden-tests.py` 自己、而且換掉的版本把這個檢查整段拿掉，
+    那就沒有人會執行這段程式碼——任何自我檢查都有這個循環。封存版真正買到的是：
+    攻擊者得寫到 **repo 之外**（guard 對封存庫是不分動詞一律擋的），
+    而且動其他四個檔案中的任何一個都會在這裡被抓到。
+    要完全消除需要獨立的使用者或容器，超出本模板範圍。
+    """
+    problems = []
+    if not isinstance(recorded, list) or not recorded:
+        return ["manifest 裡沒有封存版程式碼的紀錄（這個 task 是舊版封存，請重新封存）"]
+
+    target = runner_dir(vault)
+    for item in recorded:
+        if not isinstance(item, dict):
+            problems.append(f"紀錄格式不對：{item!r}")
+            continue
+        name = item.get("name")
+        path = target / name if name else None
+        if not name or path is None or not path.is_file():
+            problems.append(f"封存版程式碼遺失：{name}")
+            continue
+        actual = sha256_file(path)
+        if actual != item.get("sha256"):
+            problems.append(f"封存版程式碼被竄改：{name}")
+    return problems
 
 
 def sealed_log_path(vault: Path) -> Path:

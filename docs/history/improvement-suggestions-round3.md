@@ -25,13 +25,13 @@
 | P0-8 (c) 事前層 | ✅ | guard 新增 `_is_harness_source_path()`：`scripts/`、`.claude/`、`CLAUDE.md`、`harness.config.json` 只擋寫入不擋讀取。**跟草案的差別：不是無條件生效**，見下方。 |
 | P1-10 提示詞可寫 | ✅ | 併入上一項（`.claude/agents/*.md` 與 `CLAUDE.md` 都在涵蓋範圍內）。 |
 | P0-9 作廢路徑 | ✅ | 作廢改成把密文**搬進** `<vault>/_discarded/<task_id>-<時間>/` 而不是刪掉，並清掉殘留明文；封存與作廢都往 repo 之外的 `_sealed.log` 追加一行（記權杖**指紋**）；runner 發現「流水帳有、manifest 沒有」時直接判定不通過。 |
-| P1-9 自我檢查涵蓋面 | ✅（部分） | `guard-selfcheck.py` 新增 `check_audit_scripts()`：用已知情境**實跑** `verify-locks.py`（相符回 0、竄改回 1），作法跟它對 guard 做的一樣。runner 與 `hidden_vault.py` 驗不了，所以改成**明講驗不了**——見下方。 |
+| P1-9 自我檢查涵蓋面 | ✅（部分） | `guard-selfcheck.py` 新增 `check_audit_scripts()`：用已知情境**實跑** `verify-locks.py`（相符回 0、竄改回 1），作法跟它對 guard 做的一樣。runner 與 `hidden_vault.py` 不在這裡驗——(a) 落地後驗收跑的是封存版，由它自己比對簽過章的 sha256。selfcheck 自己仍然驗不了，那個循環無解，輸出裡明講。 |
 | P1-11 env-guard | ✅ | 首次執行不再印「狀態：正常（首次執行）」；基準指紋檔被 gitignore 時另外警告「這個環境若每次重新 clone，守門等同停用」。`--json` 新增 `baseline_tracked`。`orchestrator.md` 補上對 `created` 的處理。 |
 | P2-11 漂移測試基準 | ✅ | 判定基準從 `glob("test-*.py")` 換成「有 `if __name__ == "__main__"` 的入口腳本」。這條測試寫完當場就紅，抓出 `check-design-tokens.py` 與 `discard-sealed-task.py` 不在 allow 清單。 |
-| **P0-8 (a) 封存版 runner** | ❌ **未做** | 根本解，要動 seal／runner／派工指令三處，留給下一個 PR。**在它完成之前，上面的 (c) 只是縱深防禦**。 |
-| P0-8 (b) 稽核強制力面 | ❌ 未做（刻意） | 它只有在 (a) 成立後才有意義，見該節的「循環」說明。 |
+| **P0-8 (a) 封存版 runner** | ✅ | `seal` 把 runner 的**相依閉包**（它自己 + 四個 import 的模組）複製進 `<vault>/_runner/`，每個檔案的 sha256 進簽章範圍；封存版執行時先自我比對；`seal` 的輸出、`orchestrator.md` 的派工規則、`verifier-reviewer.md`／`verifier-test-writer.md` 全部改成用那個絕對路徑。 |
+| P0-8 (b) 稽核強制力面 | ❌ 未做（刻意，且已不需要） | 草案的 (b) 是「稽核整個強制力面」，但 (a) 落地後驗收根本不執行 repo 裡那幾支，稽核它們不影響驗收結果。真正要稽核的是封存版，而那已經由 (a) 的自我比對做掉。 |
 
-### 三個刻意偏離草案的決定
+### 四個刻意偏離草案的決定
 
 1. **強制力面的保護不是無條件生效，而是「這個 repo 封存過 task 之後」才生效。**
    草案沒提到這件事，實作時才發現：一律保護會讓**維護 harness 模板本身**的人
@@ -45,13 +45,37 @@
    `docs/getting-started.md` 的套用指南。** 同一個理由：`Write(./scripts/**)`
    會讓模板本身無法維護。使用者的專案不是這種情況，所以那裡該加。
 
-3. **P1-9 沒有假裝解決「誰來驗驗證者」。** selfcheck 現在會實跑 `verify-locks.py`，
-   但 runner、`hidden_vault.py`、以及 selfcheck 自己都驗不了。與其做一個看起來
-   涵蓋完整、實際上有循環的檢查，不如**在輸出裡明講哪幾支驗不了、為什麼**，
+3. **P1-9 沒有假裝解決「誰來驗驗證者」。** selfcheck 現在會實跑 `verify-locks.py`。
+   runner 與 `hidden_vault.py` 後來由 (a) 接手（驗收跑封存版，它自己比對簽過章的
+   sha256），但 **selfcheck 自己仍然驗不了**——誰來驗驗證者是個真的循環。
+   與其做一個看起來涵蓋完整、實際上有循環的檢查，不如**在輸出裡明講**，
    並在 `verifier-reviewer.md` 補一條：驗收結果與你讀程式碼的印象明顯不符時，
    以你讀到的程式碼為準。一個自稱涵蓋完整的稽核，比一個誠實承認範圍的稽核更危險。
 
-回歸測試：384 → **419 案例**（guards 90→98、vault 57→61、env-guard 16→19）。
+4. **(a) 落地後，草案的 (b) 反而變成多餘的。** 草案寫「封存時把整個強制力面的
+   sha256 都記進簽過章的 manifest，驗收時重算比對」，並且註明它單獨做沒有意義
+   （做比對的腳本自己也住在 repo 裡）。實作 (a) 之後才看清楚：驗收既然不執行
+   repo 裡那幾支，稽核它們就不影響驗收結果——**要稽核的對象從頭到尾都是封存版**，
+   而那正是 (a) 的自我比對在做的事。所以 (b) 不做，不是因為做不動，
+   是因為它在 (a) 之後已經沒有要保護的東西。
+
+   > 這也是報告寫作的一個教訓：草案在還沒實作 (a) 的時候，只看得出 (b) 有循環，
+   > 看不出 (b) 的保護對象會被 (a) 整個換掉。
+
+### 實作 (a) 時被自己的測試抓到的一個 bug
+
+「封存版程式碼遺失也要擋下」這個案例一寫完就紅了，而且紅的方式很值得記下來：
+刪掉封存版的 `attempts.py` 之後，runner 在 `import` 階段就崩潰，以 **exit 1** 結束。
+
+而在這支腳本裡，**exit 1 的語意是「有隱藏測試失敗」**——`verifier-reviewer` 會照
+那個語意判讀，`attempts.json` 還會記上一筆失敗、計入停損次數。一個「根本沒跑起來」
+的驗收會被記成「跑過了，而且失敗」。
+
+修法：把三個相依模組的 import 包進 `try/except ImportError`，一律 exit 2。
+這是第二輪 P2-9（字面大括號讓 runner 以 traceback 結束、exit 1）的同一個形狀，
+只是換了一個觸發點——**任何讓 runner 非預期結束的路徑都要先確認它的 exit code**。
+
+回歸測試：384 → **426 案例**（guards 90→98、vault 57→68、env-guard 16→19）。
 
 ---
 
