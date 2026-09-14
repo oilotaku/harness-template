@@ -148,7 +148,9 @@ def list_tasks(manifest: dict) -> int:
             continue
         baseline = info.get("baseline")
         status = "已證明會紅" if baseline and baseline.get("red") else "尚未做基線執行"
-        print(f"- {task_id}：{len(info.get('files', []))} 個檔案，封存於 {info.get('sealed_at', '未知時間')}，{status}")
+        kind = vault.task_kind(info)
+        label = "（bugfix：同類變體）" if kind == "bugfix" else ""
+        print(f"- {task_id}：{len(info.get('files', []))} 個檔案，封存於 {info.get('sealed_at', '未知時間')}，{status}{label}")
         print(f"    測試指令：{info.get('test_command')}")
         if info.get("discard_count"):
             print(f"    ⚠️ 這個 task 曾因權杖遺失作廢過 {info['discard_count']} 次，"
@@ -562,9 +564,13 @@ def main() -> int:
             "HARNESS_REPO_ROOT": str(root),
         }
 
+        kind = vault.task_kind(info)
         mode = "基線執行（預期是紅的）" if args.baseline else "驗收"
         print(f"===== 執行隱藏測試：{mode} =====")
         print(f"task_id：{args.task_id}")
+        if kind == "bugfix":
+            print("種類：**bugfix**——這批隱藏測試是同一個根因的其他變體，")
+            print("      被回報的那一個最小重現在公開測試裡（implementer 看得到）。")
         print(f"檔案數：{len(info.get('files', []))}（manifest 簽章已驗證）")
         print(f"指令：{command}")
         print("（工作目錄為 repo 根目錄，解密後的暫存目錄在測試結束後會立刻刪除）")
@@ -618,9 +624,25 @@ def main() -> int:
             print("狀態：隱藏測試全部通過。")
             print(f"（解密了 {len(info.get('files', []))} 個隱藏測試檔案；"
                   "請順帶確認上面的測試數量看起來合理）")
+            if kind == "bugfix":
+                print("（bugfix：同類變體也全綠，代表修的是根因而不是被回報的那一個 case——"
+                      "這正是 docs/root-cause-and-fix.md 步驟 6「找同類」要驗的事）")
             _record_attempt(manifest, info, args.task_id,True, args.token)
             return 0
         print(f"狀態：隱藏測試未全部通過（測試指令 exit code = {result.returncode}）。")
+        if kind == "bugfix":
+            # 這句話是 --kind bugfix 存在的理由：不講出來的話，verifier 看到的只是
+            # 「有測試失敗」，很容易退回去要 implementer「再修一下」，而真正該問的是
+            # 「他是不是只修了被回報的那一個 case」。
+            print()
+            print("⚠️ 這是 bugfix 任務，而且公開的最小重現很可能**已經綠了**——")
+            print("   紅的是同一個根因的其他變體。這通常代表 implementer 針對被回報的")
+            print("   那一個 case 寫了特例（多一個 if、多一個 early return），根因還在。")
+            print("   請先確認公開測試的狀態再判定：")
+            print("     - 公開綠 + 隱藏紅 → **修症狀不是修根因**，退回並明確要求處理根因，")
+            print("       不要只說「還有測試沒過」")
+            print("     - 公開紅 + 隱藏紅 → 連被回報的 case 都還沒修好，一般退回即可")
+            print()
         print("請把失敗的測試名稱與訊息寫進驗收報告；不要把隱藏測試的原始碼貼進報告。")
         _record_attempt(manifest, info, args.task_id,False, args.token, f"測試指令 exit code = {result.returncode}")
         return 1
@@ -638,6 +660,12 @@ def finish_baseline(manifest, info, args, root, returncode, zero, output) -> int
         print("請確認檔案平鋪在暫存區第一層、檔名樣式與測試指令對得上，修好後重新封存再跑。")
         return 1
     if returncode == 0:
+        if vault.task_kind(info) == "bugfix":
+            print("狀態：**沒有鑑別力** —— 這些變體在**修正之前**就全部通過了。")
+            print("那代表它們不是這個 bug 的同類：真正同根因的變體，在根因被修掉之前")
+            print("一定是紅的。請重新挑變體（判準見 docs/root-cause-and-fix.md §1.5），")
+            print("修正後重新封存。")
+            return 1
         print("狀態：**沒有鑑別力** —— 這份隱藏測試在沒有實作時就全部通過了。")
         print("黃金法則第 2 條「先寫測試」的前提是測試在實作前是紅的；")
         print("一份實作前就綠的測試，驗收時什麼都證明不了。請修正測試後重新封存。")
@@ -655,6 +683,11 @@ def finish_baseline(manifest, info, args, root, returncode, zero, output) -> int
 
     seen = f"{tests_seen} 個測試" if tests_seen is not None else "測試數量無法從輸出解析"
     print(f"狀態：基線如預期是紅的（exit code = {returncode}，{seen}）。")
+    if vault.task_kind(info) == "bugfix":
+        # 誠實記載這個機制驗不到的部分，不要讓人以為基線綠了就代表每個變體都合格。
+        print("⚠️ 基線看的是整批的 exit code，證明的是「**至少有一個**變體在修正前是紅的」，")
+        print("   不是「每個變體都紅」。混進一個修正前就綠的變體，這裡看不出來——")
+        print("   請自己對著上面的輸出確認每個變體都失敗了，再交回權杖。")
     print("已把基線結果寫進簽過章的 manifest；這一跑**不計入**停損次數。")
     print("接下來把權杖交回 Orchestrator，自己不要留存。")
     return 0

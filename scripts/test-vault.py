@@ -106,9 +106,11 @@ def run_script(script: Path, repo: Path, *args, extra_env=None) -> subprocess.Co
     )
 
 
-def seal(repo: Path, task_id: str = "T1", test_command: str = None, **kwargs) -> str:
+def seal(repo: Path, task_id: str = "T1", test_command: str = None, kind: str = None, **kwargs) -> str:
     """封存並回傳權杖。"""
     extra = ["--test-command", test_command] if test_command else []
+    if kind:
+        extra += ["--kind", kind]
     result = run_script(SEAL, repo, "--task-id", task_id, *extra, **kwargs)
     assert result.returncode == 0, f"封存失敗：{result.stdout}\n{result.stderr}"
     for line in result.stdout.splitlines():
@@ -836,6 +838,111 @@ def _(tmp: Path):
     seal(repo)
     listed_again = run_script(RUN, repo, "--list")
     assert "曾因權杖遺失作廢過 1 次" in listed_again.stdout, listed_again.stdout
+
+
+
+# --------------------------- bugfix 任務：公開最小重現 vs 隱藏同類變體（第 4 點）
+
+
+@case("--kind bugfix 寫進 manifest，而且在簽章範圍內（改掉就驗不過）")
+def _(tmp: Path):
+    import hidden_vault as _vault
+
+    repo = make_repo(tmp)
+    token = seal(repo, kind="bugfix")
+
+    entry = manifest_of(repo)["tasks"]["T1"]
+    assert entry["kind"] == "bugfix", entry
+    assert _vault.verify_entry(entry, token), "簽章驗不過"
+
+    tampered = dict(entry)
+    tampered["kind"] = "normal"
+    assert not _vault.verify_entry(tampered, token), (
+        "把 bugfix 改成 normal 竟然驗得過——implementer 就能關掉這層判讀"
+    )
+
+
+@case("沒給 --kind 時是 normal；舊版封存沒有這個欄位也當 normal")
+def _(tmp: Path):
+    import hidden_vault as _vault
+
+    repo = make_repo(tmp)
+    seal(repo)
+    assert manifest_of(repo)["tasks"]["T1"]["kind"] == "normal"
+
+    assert _vault.task_kind({}) == "normal", "舊版項目沒有 kind 欄位時要當 normal"
+    assert _vault.task_kind({"kind": "亂寫"}) == "normal", "不認得的值要退回 normal"
+
+
+@case("bugfix 任務失敗時，runner 直接講出「修症狀不是修根因」的判讀")
+def _(tmp: Path):
+    repo = make_repo(tmp)
+    token = seal(repo, kind="bugfix")
+    # 讓隱藏的同類變體紅掉（模擬 implementer 只修了被回報的那一個 case）。
+    (repo / "impl.py").write_text("def double(n):\n    return 0\n", encoding="utf-8")
+
+    result = run_script(RUN, repo, "--task-id", "T1", "--token", token)
+    assert result.returncode == 1, f"{result.stdout}\n{result.stderr}"
+    assert "修症狀不是修根因" in result.stdout, (
+        f"只說了「有測試失敗」，verifier 不會想到要往這個方向看：\n{result.stdout}"
+    )
+    assert "公開綠 + 隱藏紅" in result.stdout, result.stdout
+
+
+@case("一般任務失敗時不會出現 bugfix 的判讀（不該對所有任務都喊「修症狀」）")
+def _(tmp: Path):
+    repo = make_repo(tmp)
+    token = seal(repo)
+    (repo / "impl.py").write_text("def double(n):\n    return 0\n", encoding="utf-8")
+
+    result = run_script(RUN, repo, "--task-id", "T1", "--token", token)
+    assert result.returncode == 1, f"{result.stdout}\n{result.stderr}"
+    assert "修症狀不是修根因" not in result.stdout, result.stdout
+
+
+@case("bugfix 任務通過時，明講「同類變體也綠了＝修的是根因」")
+def _(tmp: Path):
+    repo = make_repo(tmp)
+    token = seal(repo, kind="bugfix")
+
+    result = run_script(RUN, repo, "--task-id", "T1", "--token", token)
+    assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
+    assert "修的是根因" in result.stdout, result.stdout
+
+
+@case("bugfix 的基線若在修正前就全綠，訊息要說「不是這個 bug 的同類」")
+def _(tmp: Path):
+    # PASSING_TEST 對著一份正確的實作，等同「修正前就綠」的變體。
+    repo = make_repo(tmp)
+    token = seal(repo, kind="bugfix")
+
+    result = run_script(RUN, repo, "--task-id", "T1", "--token", token, "--baseline")
+    assert result.returncode == 1, f"{result.stdout}\n{result.stderr}"
+    assert "不是這個 bug 的同類" in result.stdout, (
+        f"講成一般的「沒有鑑別力」，看的人不知道該重挑變體：\n{result.stdout}"
+    )
+
+
+@case("bugfix 的基線紅了之後，要誠實說明它只證明「至少一個變體是紅的」")
+def _(tmp: Path):
+    repo = make_repo(tmp, hidden_source=FAILING_TEST)
+    token = seal(repo, kind="bugfix")
+
+    result = run_script(RUN, repo, "--task-id", "T1", "--token", token, "--baseline")
+    assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
+    assert "至少有一個" in result.stdout, (
+        f"沒有講清楚基線驗不到「每個變體都紅」：\n{result.stdout}"
+    )
+
+
+@case("--list 標出 bugfix 任務")
+def _(tmp: Path):
+    repo = make_repo(tmp)
+    seal(repo, kind="bugfix")
+
+    listed = run_script(RUN, repo, "--list")
+    assert listed.returncode == 0, listed.stderr
+    assert "bugfix" in listed.stdout, listed.stdout
 
 
 

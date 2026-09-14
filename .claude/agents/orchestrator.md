@@ -63,6 +63,12 @@ frontmatter 的 `thinking` 欄位**不會被 Claude Code 讀取**，它只是本
 4. **任務拆解**（依 `docs/task-decomposition-guide.md`）
    - 把需求拆成多個 task，每個 task 填寫 `templates/task-spec-template.md`。
    - 每個 task 必須有：明確目標、驗收標準、輸入輸出邊界、禁止事項。
+   - **bug 修正 task 要在 task-spec 裡註明它是 bug 修正**，並附上已定位的根因
+     （`docs/root-cause-and-fix.md` 步驟 3 的產出）。`verifier-test-writer` 靠這個
+     決定要走 §1.5 的「公開最小重現 + 隱藏同類變體」拆法，而不是一般任務的寫法；
+     沒註明的話它會當成一般 task，那層驗收強度就沒了。
+   - bug 修正一律開**新的 task_id**，不要重新封存原本那個 task——重封會換權杖，
+     也會把兩次驗收的嘗試次數混在一起，而那個計數是停損判斷的依據。
 
 5. **模型與思考層級指派**（依 `docs/model-thinking-matrix.md`）
    - 依任務複雜度、風險等級，替每個 task 標註要用哪個模型、思考層級多高。

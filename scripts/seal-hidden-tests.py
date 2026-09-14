@@ -21,6 +21,7 @@
     python3 scripts/seal-hidden-tests.py --task-id T2 --test-command "npx vitest run {dir}"
 
 權杖處理規則（重要）：
+  - bugfix 任務加 `--kind bugfix`（見 docs/root-cause-and-fix.md §1.5）
   - verifier-test-writer 拿到權杖後**先做基線執行**：
     `python3 scripts/run-hidden-tests.py --task-id <id> --token <權杖> --baseline`
     確認隱藏測試在沒有實作時是紅的（不計入停損次數，結果寫進 manifest）
@@ -126,6 +127,16 @@ def lock_public_tests(root: Path) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="鎖定公開測試、封存隱藏測試到 repo 之外並加密、簽章 manifest")
     parser.add_argument("--task-id", required=True, help="這批隱藏測試對應的 task_id")
+    parser.add_argument(
+        "--kind",
+        choices=vault.TASK_KINDS,
+        default=vault.DEFAULT_TASK_KIND,
+        help=(
+            "task 種類。bugfix＝修 bug 的任務：公開測試是被回報的那一個最小重現，"
+            "隱藏測試是同一個根因的其他變體，用來驗「修的是根因還是只修了那一個 case」"
+            "（見 docs/root-cause-and-fix.md）"
+        ),
+    )
     parser.add_argument(
         "--test-command",
         default=None,
@@ -233,6 +244,8 @@ def main() -> int:
         # 這個值來自舊 entry（舊權杖簽的，這裡驗不了）；被亂改的後果只會是
         # 「次數不可信 → should_stop 未知」，永遠不會變成假的「沒有失敗過」。
         "attempts_recorded": int(previous_entry.get("attempts_recorded") or 0),
+        # 在簽章範圍內：implementer 改不掉，所以 runner 可以信任它來決定怎麼判讀失敗。
+        "kind": args.kind,
         # 這個 task 被作廢過幾次（權杖遺失）。帶進**簽過章**的項目裡，作廢才不會
         # 把歷史洗白——墓碑本身沒有簽章，但一旦重新封存，這個數字就受簽章保護了。
         "discard_count": int(previous_entry.get("discard_count") or 0),
@@ -270,6 +283,9 @@ def main() -> int:
               "墓碑已由這次封存取代）")
         print("（作廢次數與已記錄的嘗試筆數都已帶進新項目，並在簽章範圍內——"
               "verifier-reviewer 要把「曾經作廢」寫進驗收報告）")
+    if args.kind == "bugfix":
+        print("種類：**bugfix**——這批隱藏測試是「同一個根因的其他變體」，")
+        print("      被回報的那一個最小重現應該放在**公開測試**裡（implementer 要看得到）。")
     print(f"來源暫存區：{staging_labels}")
     print(f"已封存 {len(entries)} 個隱藏測試檔案（每檔獨立金鑰）：")
     for item in entries:
