@@ -342,10 +342,14 @@ def _(tmp: Path):
 # init.py
 # --------------------------------------------------------------------------
 
-@case("init --json 把三個區塊合併成一份文件，stdout 只有 JSON")
+@case("init --json 把四個區塊合併成一份文件，stdout 只有 JSON")
 def _(tmp: Path):
+    # version 是產出專案自己的狀態（不是機器狀態），但 Orchestrator 在同一個時機需要它：
+    # 拆解任務時要知道現在是哪一版，驗收後才知道該升到哪一版。
     report = parse_json_stdout(run_script(tmp, "init.py", "--json"))
-    assert set(report["sections"]) == {"machine", "services", "env_guard"}, report["sections"].keys()
+    assert set(report["sections"]) == {"machine", "services", "env_guard", "version"}, (
+        report["sections"].keys()
+    )
     assert report["status"] == "ok", report
 
 

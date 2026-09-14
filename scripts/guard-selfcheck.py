@@ -50,6 +50,7 @@ REPO_ROOT = _repo_root()
 GUARD = REPO_ROOT / "scripts" / "guard-hidden-tests.py"
 VERIFY_LOCKS = REPO_ROOT / "scripts" / "verify-locks.py"
 RUN_HIDDEN = REPO_ROOT / "scripts" / "run-hidden-tests.py"
+VERSION_SCRIPT = REPO_ROOT / "scripts" / "version.py"
 HIDDEN_MANIFEST = REPO_ROOT / ".harness" / "hidden-manifest.json"
 
 # 探測用的路徑要跟設定檔一致，否則在自訂測試目錄的專案上會探到一個
@@ -124,6 +125,9 @@ SCAN_SKIP_DIRS = {
     ".git", ".harness", "node_modules", "venv", ".venv", "__pycache__",
     "target", "dist", "build", ".next", "vendor",
     "templates",  # 本模板自己的範例目錄，不是使用者的測試
+    # 版本歸檔裡有 tests/public 的副本。不跳過的話，這個掃描會把那些副本
+    # 當成「有測試但不在受保護路徑」而誤報——而誤報久了就會讓人忽略真的警告。
+    "releases",
 }
 
 
@@ -307,6 +311,50 @@ def check_locks() -> None:
         print("公開測試鎖定稽核：目前沒有可驗證的鎖定清單（尚未執行 lock-tests.py，屬正常起始狀態）。")
 
 
+def check_version() -> None:
+    """報告產出專案目前的版本號。
+
+    「這個專案沒在管版本」如果是無聲的，它就會一直沒聲音——直到某天使用者回報
+    「壞掉了」，而沒有人說得出是哪一版壞的。所以這裡每個 session 都講一次：
+    有版本就報版本，沒有就明講缺什麼、怎麼補。
+    """
+    if not VERSION_SCRIPT.exists():
+        return
+    result = subprocess.run(
+        [sys.executable, str(VERSION_SCRIPT), "--json"],
+        text=True, encoding="utf-8", errors="replace",
+        capture_output=True,
+        cwd=str(REPO_ROOT),
+        env={**os.environ, "CLAUDE_PROJECT_DIR": str(REPO_ROOT)},
+    )
+    try:
+        payload = json.loads(result.stdout)
+    except (json.JSONDecodeError, ValueError):
+        print("⚠️ 版本號檢查失敗（version.py --json 沒有吐出合法 JSON）。")
+        return
+
+    if payload.get("ok"):
+        mirrors = payload.get("mirrors") or 0
+        suffix = f"，{mirrors} 個顯示位置一致" if mirrors else ""
+        print(f"產出專案版本：{payload['version']}（來源 {payload.get('source')}{suffix}）")
+        return
+
+    drifted = payload.get("drifted") or []
+    if drifted:
+        # 「有版本號但各處不一致」跟「沒有版本號」是兩件事，不能講成同一句：
+        # 前者要修的是同步，後者要修的是建立。
+        print(f"⚠️ 版本號漂掉了：主要來源是 {payload.get('version')}，但這些地方不一致——")
+        for item in drifted:
+            found = item.get("found") or "找不到版本號"
+            print(f"   - {item.get('file')}：{found}")
+        print("   不必跑工具就看得到的那些地方寫的是錯的版本，那比沒有版本號更糟。")
+        print(f"   同步：python3 scripts/version.py --set {payload.get('version')}")
+        return
+
+    print(f"⚠️ 這個專案還沒有版本號（{payload.get('reason', '原因不明')}）——")
+    print("   使用者回報問題時將無法定位是哪一版。建立：python3 scripts/version.py --init")
+
+
 def check_vault_state() -> None:
     """兩件只有在 session 開始時看一眼才會被發現的事。
 
@@ -396,6 +444,7 @@ def main() -> int:
     check_unprotected_hidden_dirs()
     check_locks()
     check_vault_state()
+    check_version()
     print("===== 結束 =====")
 
     if args.strict and (failures or not config_ok):

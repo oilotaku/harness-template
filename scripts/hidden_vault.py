@@ -71,6 +71,31 @@ MANIFEST_MAC_INFO = b"harness-manifest-mac-v1"
 # verifier-reviewer 看得到這個 task 被作廢過幾次。
 DISCARDED_STATUS = "discarded"
 
+# task 的種類。差別只有一個，但那個差別很關鍵：
+#
+#   normal —— 一般任務。隱藏測試驗的是「task-spec 的驗收標準有沒有達成」。
+#   bugfix —— 修 bug 的任務。公開測試是**被回報的那一個最小重現**（implementer
+#             看得到，才知道要修什麼），隱藏測試是**同一個根因的其他變體**
+#             （implementer 看不到，所以沒辦法針對它硬寫一個 if 繞過去）。
+#
+# 為什麼要分：bug 修正最常見的假修正是「只讓被回報的那個 case 過」。如果回歸測試
+# 全部公開，implementer 看得到重現條件，硬寫特例就能變綠；如果全部隱藏，他連要修
+# 什麼都不知道。兩邊都要，而且分工明確，才驗得出「修的是根因還是那一個 case」。
+#
+# 這個欄位在簽章範圍內，implementer 改不了；runner 據此在**失敗當下**直接說出
+# 「公開重現可能已經綠了，但同類變體還是紅的」這個判讀，而不是丟一句泛泛的
+# 「有測試失敗」讓 verifier 自己想到要往這個方向看。
+TASK_KINDS = ("normal", "bugfix")
+DEFAULT_TASK_KIND = "normal"
+
+
+def task_kind(entry) -> str:
+    """讀 manifest 項目的 task 種類。舊版封存沒有這個欄位，一律當 normal。"""
+    if not isinstance(entry, dict):
+        return DEFAULT_TASK_KIND
+    kind = entry.get("kind")
+    return kind if kind in TASK_KINDS else DEFAULT_TASK_KIND
+
 # 測試指令範本裡唯三會被代換的 placeholder。用 str.replace 逐一代換而不是
 # str.format——第二輪 P2-9：Go 的 `-run '^Test{Foo}$'` 這種字面大括號會讓
 # format 丟 KeyError，runner 以 traceback 結束、exit 1，被 verifier 讀成「有測試失敗」。

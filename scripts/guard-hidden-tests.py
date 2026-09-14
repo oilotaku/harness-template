@@ -169,9 +169,26 @@ HIDDEN_MANIFEST = REPO_ROOT / ".harness" / "hidden-manifest.json"
 # 模組說明（P1-4：寫死路徑會讓非 Python 專案的保護悄悄失效）。
 # 設定檔有問題時記下錯誤，由 main() 轉成 exit 2（fail-closed），不是靜靜退回預設值。
 HIDDEN_TEST_PATTERNS = ["tests/hidden"]
+# 產出專案的版本檔。它是治理資訊（誰、什麼時候、升到哪一版），不是實作的一部分，
+# 所以比照已鎖定的公開測試：**只擋寫入、不擋讀取**——implementer 有正當理由讀它
+# （例如實作一個 `--version` 旗標），沒有正當理由改它。改版本號是 Orchestrator
+# 透過 `scripts/version.py` 做的事，見 docs/versioning.md。
+VERSION_FILE = "VERSION"
+
+# 版本歸檔目錄（每個版本一個資料夾，見 scripts/release_archive.py）。
+# 已發布版本的快照是唯讀的歷史：就地改掉它比沒有快照更糟——它看起來是那一版，
+# 其實不是。所以比照版本檔**只擋寫入、不擋讀取**（比對舊版行為是正當用途）。
+ARCHIVE_DIR = "releases"
 if harness_config is not None:
     try:
-        HIDDEN_TEST_PATTERNS = harness_config.load(REPO_ROOT)["hidden_test_paths"]
+        _config = harness_config.load(REPO_ROOT)
+        HIDDEN_TEST_PATTERNS = _config["hidden_test_paths"]
+        VERSION_FILE = _config["version"]["file"]
+        _archive = _config["version"].get("archive")
+        if _archive is False:
+            ARCHIVE_DIR = None
+        elif isinstance(_archive, dict):
+            ARCHIVE_DIR = _archive["dir"]
     except BaseException as _exc:  # noqa: BLE001 — 設定壞掉一律 fail-closed
         _STARTUP_ERROR = _exc
 
@@ -384,10 +401,26 @@ def _is_harness_path(rel) -> bool:
     return normalized == HARNESS_DIR_PREFIX or normalized.startswith(HARNESS_DIR_PREFIX + "/")
 
 
+def _is_version_file(rel) -> bool:
+    return bool(rel) and bool(VERSION_FILE) and rel.rstrip("/") == VERSION_FILE
+
+
+def _is_archive_path(rel) -> bool:
+    if not rel or not ARCHIVE_DIR:
+        return False
+    target = rel.rstrip("/")
+    return target == ARCHIVE_DIR or target.startswith(ARCHIVE_DIR + "/")
+
+
 def _is_protected_write_target(rel, locked: set) -> bool:
     if not rel:
         return False
-    if _is_hidden_tests_path(rel) or _is_harness_path(rel):
+    if (
+        _is_hidden_tests_path(rel)
+        or _is_harness_path(rel)
+        or _is_version_file(rel)
+        or _is_archive_path(rel)
+    ):
         return True
     return rel.rstrip("/") in locked
 
@@ -419,6 +452,20 @@ def _check_file_path(raw_path: str, locked: set, tool_name: str = None):
         return (
             f"拒絕：「{target}」屬於 harness 治理檔案（鎖定清單/環境指紋），"
             "不可由一般編輯動作寫入，只能由對應腳本（lock-tests.py / env-guard.py）產生。"
+        )
+
+    if _is_archive_path(target):
+        return (
+            f"拒絕：「{target}」屬於版本歸檔（已發布版本的原始碼快照），不可修改。"
+            "就地改掉一個已發布版本的快照，比沒有快照更糟——它看起來是那一版，其實不是。"
+            "歸檔由 `python3 scripts/version.py` 在升版時產生（讀它沒有問題，只有寫入被擋）。"
+        )
+
+    if _is_version_file(target):
+        return (
+            f"拒絕：「{target}」是這個專案的版本檔，屬於治理資訊，實作者不可修改。"
+            "版本號由 Orchestrator 用 `python3 scripts/version.py --bump <層級>` 更新"
+            "（讀它沒有問題，只有寫入被擋）。"
         )
 
     if target.rstrip("/") in locked:
@@ -607,8 +654,8 @@ def _check_bash_command(command: str, locked: set):
         for target in write_candidates:
             if _is_protected_write_target(_to_repo_relative(target, cwd), locked):
                 return (
-                    "拒絕：偵測到 Bash 指令對受保護路徑（隱藏測試暫存區、.harness/ 或"
-                    f"已鎖定的公開測試）執行了寫入類操作（`{verb}` 目標：「{target}」），"
+                    "拒絕：偵測到 Bash 指令對受保護路徑（隱藏測試暫存區、.harness/、"
+                    f"已鎖定的公開測試或版本檔）執行了寫入類操作（`{verb}` 目標：「{target}」），"
                     "一律擋下。若為誤判，請改用不涉及這些路徑的方式完成，"
                     "或請 Orchestrator / verifier 協助處理。"
                 )

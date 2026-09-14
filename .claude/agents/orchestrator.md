@@ -63,6 +63,34 @@ frontmatter 的 `thinking` 欄位**不會被 Claude Code 讀取**，它只是本
 4. **任務拆解**（依 `docs/task-decomposition-guide.md`）
    - 把需求拆成多個 task，每個 task 填寫 `templates/task-spec-template.md`。
    - 每個 task 必須有：明確目標、驗收標準、輸入輸出邊界、禁止事項。
+   - **bug 修正 task 要在 task-spec 裡註明它是 bug 修正**，並附上已定位的根因
+     （`docs/root-cause-and-fix.md` 步驟 3 的產出）。`verifier-test-writer` 靠這個
+     決定要走 §1.5 的「公開最小重現 + 隱藏同類變體」拆法，而不是一般任務的寫法；
+     沒註明的話它會當成一般 task，那層驗收強度就沒了。
+   - bug 修正一律開**新的 task_id**，不要重新封存原本那個 task——重封會換權杖，
+     也會把兩次驗收的嘗試次數混在一起，而那個計數是停損判斷的依據。
+
+   **產出專案的版本號（只有你能改，見 `docs/versioning.md`）**
+   - 目前版本從 `init.py --json` 的 `sections.version` 就讀得到，不用另外問使用者。
+   - 顯示「這個專案還沒有版本號」時，**派工之前**先建立：
+     `python3 scripts/version.py --init`。沒有版本號的話，之後使用者回報問題
+     沒有任何東西可以定位是哪一版。
+   - **一批需求全部驗收通過、commit 之後**升一次版，不是每個 task 升一次——
+     使用者看到的是一個發布，不是你的任務拆解。
+   - 升哪一位看**使用者那一側**：既有呼叫方不改任何東西還能照舊運作嗎？
+     不能 → MAJOR；新增功能且相容 → MINOR；只有 bug 修正 → PATCH
+     （`--kind bugfix` 的 task 天然落在 PATCH）。
+   - 用 `python3 scripts/version.py --bump <層級>`，不要用 Write/Edit 直接改版本檔——
+     guard 會擋（那條規則是為了擋 implementer，對你也一樣生效）。
+   - **版本要讓人不必跑工具就看得到**：README、程式自己的輸出（CLI `--version`、
+     服務的 `/version` 或啟動日誌、UI 的關於頁，至少一個）、套件 manifest。
+     把這些位置宣告成 `harness.config.json` 的 `version.mirrors`，`--bump` 才會
+     一起更新；沒宣告的地方會漂，而過期的版本號比沒有版本號更糟。
+   - 專案第一次建立時，**把「程式要能自報版本」寫成一條驗收標準**放進對應的
+     task-spec（怎麼報依語言而定，所以這是 task-spec 的事，不是腳本能代勞的）。
+   - 升版會自動把原始碼另存成 `releases/<版本>/`（見 `docs/versioning.md` §4.5）。
+     **要修舊版就從那一版拉分支，不要去改 `releases/` 裡的快照**——那是唯讀的歷史，
+     guard 也會擋。
 
 5. **模型與思考層級指派**（依 `docs/model-thinking-matrix.md`）
    - 依任務複雜度、風險等級，替每個 task 標註要用哪個模型、思考層級多高。

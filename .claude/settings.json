@@ -27,6 +27,7 @@
       "Bash(python3 scripts/test-skills.py)",
       "Bash(python3 scripts/show-attempts.py:*)",
       "Bash(python3 scripts/test-attempts.py)",
+      "Bash(python3 scripts/test-version.py)",
       "Bash(python3 scripts/guard-selfcheck.py:*)"
     ],
     "deny": [
