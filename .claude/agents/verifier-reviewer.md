@@ -76,6 +76,11 @@ frontmatter 的 `thinking` 欄位**不會被 Claude Code 讀取**，它只是本
      明文當時落在封存庫裡（`guard-hidden-tests.py` 擋得住的路徑），不等於一定外洩，
      但**要寫進驗收報告**，讓人判斷這一輪的資訊不對稱還成不成立。
    - runner 若印出「這個 task 曾因權杖遺失作廢過 N 次」，同樣寫進報告。
+   - **有圖形介面的 task**：跑 `python3 scripts/check-design-tokens.py`。
+     它驗的是設計 token 的結構與 WCAG AA 對比度——這是「可及性」這條隱性驗收標準
+     唯一能客觀判定的部分，不要用眼睛代替它。紅了就是不通過。
+     另外看 implementer 的變更說明有沒有動過 `design.tokens.json`：
+     功能 task 夾帶修改設計基準會影響所有畫面，屬於超出範圍（黃金法則第 4 條）。
    - **bugfix 任務**（runner 會標示種類）失敗時，先確認公開測試的狀態再判定：
      公開綠 + 隱藏紅 = implementer **只修了被回報的那一個 case**，根因還在。
      退回時要明確要求處理根因，不可以只寫「還有測試沒過」——那句話會讓下一輪

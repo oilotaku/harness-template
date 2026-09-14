@@ -35,6 +35,8 @@
 | 連續失敗 ≥3 次要停損 | implementer 自我申報 | 由執行測試的一方寫入、逐筆簽章的客觀次數；筆數也簽進 manifest，砍掉紀錄查得出來 |
 | bug 修的是根因不是症狀 | 「修完記得找同類」 | 公開放被回報的最小重現、隱藏放同類變體：公開綠 + 隱藏紅 = 只修了那一個 case |
 | 版本號不會漂 | 記得每個地方一起改 | README／程式／manifest 的版本宣告成 `mirrors`，一起更新、一起驗一致 |
+| 畫面不會每個 task 一套 | 「照設計稿做」 | 顏色/間距/字級由專案宣告成角色化 token，實作者取用而不是發明 |
+| 可及性真的被驗到 | 「a11y 是隱性驗收標準」 | 對比度對明暗兩套逐組算 WCAG AA——預設色票第一版的深色邊框是 2.99、門檻 3.00，眼睛看不出來 |
 | 檢驗者不動手改實作 | 提示詞叮嚀 | 它沒有 `Write` 工具；skill 政策也擋掉會產生程式碼的 skill |
 | 文件、設定、CI 保持一致 | 記得同步 | 漂移測試——少同步一處就直接紅 |
 | 環境變了要停下來確認 | 使用者自己注意 | 環境指紋比對，且刻意**不把容器的隨機主機名當成環境變更**（總是誤報的守門等於沒有守門） |
@@ -118,11 +120,12 @@ OS 使用者」的子智能體——權杖會經過 Claude Code 的 transcript�
 | `.claude/agents/` | 子智能體定義（Orchestrator 1 個、實作者 3 個、檢驗者 3 個） |
 | `.claude/commands/` | `/task-plan` `/task-dispatch` `/machine-check` 斜線指令（用法見下） |
 | `scripts/` | 掃描、防作弊機制本體、決策輔助工具（見下面兩張表） |
-| `docs/` | **從零開始套用**、任務拆解、模型/思考分配、實作/檢驗分離、多語言支援、記憶管理、token 成本策略、根因分析與修正流程、**使用者回報處理**、**版本號**、執行時間預測、skill 安裝決策 |
+| `docs/` | **從零開始套用**、任務拆解、模型/思考分配、實作/檢驗分離、多語言支援、記憶管理、token 成本策略、根因分析與修正流程、**使用者回報處理**、**版本號**、**前端/GUI 預設設計**、執行時間預測、skill 安裝決策 |
 | `templates/` | task-spec、驗收報告、驗收標準對照表、**使用者回報單**範本（含 `examples/` 的完整範例） |
 | `reports/` | 驗收報告落檔處（檢驗者沒有 `Write` 工具，由 Orchestrator 落檔） |
 | `releases/` | 每個版本一個資料夾，存放那一版的完整原始碼（升版時自動產生，可關掉；見 `docs/versioning.md` §4.5） |
 | `VERSION` | 這個專案的版本號（位置可由 `harness.config.json` 改；只能由 `scripts/version.py` 寫入） |
+| `design.tokens.json` | 前端／GUI 的設計基準：角色化的顏色、間距、字級（沒有圖形介面的專案可用 `"design": false` 關掉） |
 | `harness.config.json` | （選用）這個專案的測試路徑慣例、版本號來源與顯示位置；非 Python 專案要設 |
 | `skills.catalog.json` | （選用）這個專案要裝哪些 skill、給誰 |
 
@@ -179,6 +182,7 @@ OS 使用者」的子智能體——權杖會經過 Claude Code 的 transcript�
 | `scripts/timing.py` / `scripts/estimate-time.py` | 執行時間預測：分類單價 + 週期開銷 + CI 重試，再用專案歷史校準 | 拆解完估時、驗收後回填實際值 |
 | `scripts/skill_policy.py` / `scripts/suggest-skills.py` | 依專案目標決定要安裝哪些 skill；強制「檢驗者拿不到會產生程式碼的 skill」 | 派工前 |
 | `scripts/attempts.py` / `scripts/show-attempts.py` | 驗收嘗試次數與停損判斷；次數由 runner 寫入，不靠 implementer 自我申報 | 驗收後、決定是否再派一輪時 |
+| `scripts/design_tokens.py` / `scripts/check-design-tokens.py` | 前端／GUI 的設計基準：驗 token 結構，並對明暗兩套逐組算 WCAG AA 對比度。設計好不好看驗不了，但「讀不讀得到」算得出來 | 前端 task 驗收時、改過任何顏色之後 |
 
 三個共通的設計原則（三支腳本各自的說明裡都有詳述）：
 
@@ -200,10 +204,11 @@ python3 scripts/test-guards.py && python3 scripts/test-locks.py \
   && python3 scripts/test-vault.py && python3 scripts/test-env-guard.py \
   && python3 scripts/test-config.py && python3 scripts/test-scan-json.py \
   && python3 scripts/test-timing.py && python3 scripts/test-skills.py \
-  && python3 scripts/test-attempts.py && python3 scripts/test-version.py
+  && python3 scripts/test-attempts.py && python3 scripts/test-version.py \
+  && python3 scripts/test-design.py
 ```
 
-這十組（共 **352 個案例**）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
+這十一組（共 **373 個案例**）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
 六種組合上自動執行，Linux 另外多跑一輪 `LC_ALL=C`（非 UTF-8 locale）
 （見 `.github/workflows/ci.yml`）。
 

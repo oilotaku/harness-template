@@ -1,0 +1,78 @@
+{
+  "$comment": "這個專案的設計基準。實作者依這份檔案決定顏色/間距/字級，不自己發明。角色命名與跨技術棧的映射見 docs/frontend-design-defaults.md。",
+  "$schema_version": 1,
+
+  "spacing": {
+    "$comment": "4 的倍數。相鄰兩階差異夠明顯，排版才不會出現『看起來一樣但其實差 2px』的情況。",
+    "unit": 4,
+    "scale": [0, 4, 8, 12, 16, 24, 32, 48, 64, 96]
+  },
+
+  "radius": {
+    "none": 0,
+    "sm": 4,
+    "md": 8,
+    "lg": 16,
+    "pill": 9999
+  },
+
+  "typography": {
+    "$comment": "scale 是字級（px 或各平台的等效單位）。base 是內文。",
+    "base": 16,
+    "scale": [12, 14, 16, 20, 24, 32, 40],
+    "line_height": { "tight": 1.25, "normal": 1.5, "relaxed": 1.75 },
+    "weight": { "regular": 400, "medium": 500, "bold": 700 }
+  },
+
+  "color": {
+    "$comment": "角色命名，不是色階命名。明暗兩套用同一組名字——切主題換的是值，不是名字。",
+    "light": {
+      "surface": "#FFFFFF",
+      "surface-muted": "#F2F4F7",
+      "on-surface": "#16191D",
+      "on-surface-muted": "#515C6B",
+      "border": "#7E8899",
+      "primary": "#1F4FD8",
+      "on-primary": "#FFFFFF",
+      "danger": "#B3261E",
+      "on-danger": "#FFFFFF",
+      "success": "#1B6E3C",
+      "on-success": "#FFFFFF",
+      "warning": "#7A4E00",
+      "on-warning": "#FFFFFF",
+      "focus": "#1F4FD8"
+    },
+    "dark": {
+      "surface": "#14171C",
+      "surface-muted": "#1E232B",
+      "on-surface": "#E9ECF1",
+      "on-surface-muted": "#A7B1BF",
+      "border": "#6E7887",
+      "primary": "#9CB6FF",
+      "on-primary": "#0B1020",
+      "danger": "#FFB4AB",
+      "on-danger": "#320F0C",
+      "success": "#86D9A4",
+      "on-success": "#062012",
+      "warning": "#F2C067",
+      "on-warning": "#2B1C00",
+      "focus": "#9CB6FF"
+    }
+  },
+
+  "contrast_pairs": [
+    { "foreground": "on-surface", "background": "surface", "level": "text" },
+    { "foreground": "on-surface", "background": "surface-muted", "level": "text" },
+    { "foreground": "on-surface-muted", "background": "surface", "level": "text" },
+    { "foreground": "on-surface-muted", "background": "surface-muted", "level": "text" },
+    { "foreground": "on-primary", "background": "primary", "level": "text" },
+    { "foreground": "on-danger", "background": "danger", "level": "text" },
+    { "foreground": "on-success", "background": "success", "level": "text" },
+    { "foreground": "on-warning", "background": "warning", "level": "text" },
+    { "foreground": "primary", "background": "surface", "level": "text" },
+    { "foreground": "danger", "background": "surface", "level": "text" },
+    { "foreground": "border", "background": "surface", "level": "non-text" },
+    { "foreground": "border", "background": "surface-muted", "level": "non-text" },
+    { "foreground": "focus", "background": "surface", "level": "non-text" }
+  ]
+}
