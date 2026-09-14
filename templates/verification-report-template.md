@@ -2,6 +2,10 @@
 
 - **檢驗者**：（verifier-reviewer / verifier-security）
 - **對應 task_id**：
+- **任務來源**：（三選一，由 Orchestrator 在 task-spec 裡指定）
+  - 新需求
+  - 使用者回報 → 回報單：______（見 `docs/user-reports.md`）
+  - bug 修正 → **這個 bug 出在哪個 task 的產出**：______（查得到才填，查不到就寫「未知」）
 - **驗收當下的產出版本**：（`python3 scripts/version.py` 的輸出；
   之後要查「這個修正在哪一版」就靠它）
 - **結論**：（通過 / 不通過 —— 不可有模糊地帶）

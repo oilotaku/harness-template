@@ -1,0 +1,15 @@
+{
+  "$comment": "這個模板自己的設定。測試路徑用預設值（tests/public、tests/hidden）所以不列——列了只是多一個會漂的地方。",
+
+  "version": {
+    "$comment": "版本顯示在 README 上，由 scripts/version.py --bump 一起更新、--check 一起驗（見 docs/versioning.md §2.5）。",
+    "file": "VERSION",
+    "format": "plain",
+    "mirrors": [
+      { "file": "README.md", "pattern": "**版本**：{version}" }
+    ],
+
+    "$comment_archive": "模板自己關掉每版歸檔。它的使用者是 clone 這個 repo 的人，不是去 releases/ 撈某一版的人；而歸檔會讓 repo 每升一版就多一份完整副本。產出的專案預設是開著的。",
+    "archive": false
+  }
+}

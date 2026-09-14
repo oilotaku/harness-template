@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/oilotaku/harness-template/actions/workflows/ci.yml/badge.svg)](https://github.com/oilotaku/harness-template/actions/workflows/ci.yml)
 
+**版本**：0.1.0
+
 一個給 Claude Code（或任何支援 sub-agent 的 AI 開發流程）使用的**基本開發框架**，
 用來把「一個模糊的需求」變成「多個可獨立驗收、互相制衡的子任務」。
 
@@ -120,6 +122,7 @@ OS 使用者」的子智能體——權杖會經過 Claude Code 的 transcript�
 | `templates/` | task-spec、驗收報告、驗收標準對照表、**使用者回報單**範本（含 `examples/` 的完整範例） |
 | `reports/` | 驗收報告落檔處（檢驗者沒有 `Write` 工具，由 Orchestrator 落檔） |
 | `releases/` | 每個版本一個資料夾，存放那一版的完整原始碼（升版時自動產生，可關掉；見 `docs/versioning.md` §4.5） |
+| `VERSION` | 這個專案的版本號（位置可由 `harness.config.json` 改；只能由 `scripts/version.py` 寫入） |
 | `harness.config.json` | （選用）這個專案的測試路徑慣例、版本號來源與顯示位置；非 Python 專案要設 |
 | `skills.catalog.json` | （選用）這個專案要裝哪些 skill、給誰 |
 
