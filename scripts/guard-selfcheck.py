@@ -331,8 +331,23 @@ def check_version() -> None:
         return
 
     if payload.get("ok"):
-        print(f"產出專案版本：{payload['version']}（來源 {payload.get('source')}）")
+        mirrors = payload.get("mirrors") or 0
+        suffix = f"，{mirrors} 個顯示位置一致" if mirrors else ""
+        print(f"產出專案版本：{payload['version']}（來源 {payload.get('source')}{suffix}）")
         return
+
+    drifted = payload.get("drifted") or []
+    if drifted:
+        # 「有版本號但各處不一致」跟「沒有版本號」是兩件事，不能講成同一句：
+        # 前者要修的是同步，後者要修的是建立。
+        print(f"⚠️ 版本號漂掉了：主要來源是 {payload.get('version')}，但這些地方不一致——")
+        for item in drifted:
+            found = item.get("found") or "找不到版本號"
+            print(f"   - {item.get('file')}：{found}")
+        print("   不必跑工具就看得到的那些地方寫的是錯的版本，那比沒有版本號更糟。")
+        print(f"   同步：python3 scripts/version.py --set {payload.get('version')}")
+        return
+
     print(f"⚠️ 這個專案還沒有版本號（{payload.get('reason', '原因不明')}）——")
     print("   使用者回報問題時將無法定位是哪一版。建立：python3 scripts/version.py --init")
 

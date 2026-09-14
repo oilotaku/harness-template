@@ -244,7 +244,7 @@ def _(tmp: Path):
     result = run(repo, "--json")
     payload = json.loads(result.stdout)
     assert payload == {"ok": True, "version": "1.2.3", "source": "VERSION",
-                       "format": "plain", "changed": False}, payload
+                       "format": "plain", "changed": False, "mirrors": 0}, payload
 
     bumped = json.loads(run(repo, "--bump", "patch", "--json").stdout)
     assert bumped["version"] == "1.2.4" and bumped["previous"] == "1.2.3", bumped
@@ -300,6 +300,161 @@ def _(tmp: Path):
     assert guard(repo, {"tool_name": "Write", "tool_input": {"file_path": "VERSION"}}) == 0, (
         "設定沒有指到 VERSION 了，卻還在擋它"
     )
+
+
+# ------------------------------------------- 鏡像：不必跑工具就看得到，且不會漂
+
+MIRROR_CONFIG = {
+    "version": {
+        "file": "VERSION",
+        "mirrors": [
+            {"file": "README.md", "pattern": "**版本**：{version}"},
+            {"file": "src/app.py", "pattern": '__version__ = "{version}"'},
+            {"file": "package.json", "format": "json", "key": "version"},
+        ],
+    }
+}
+
+MIRROR_FILES = {
+    "VERSION": "1.0.0\n",
+    "README.md": "# Demo\n\n**版本**：1.0.0\n\n說明文字要留著。\n",
+    "src/app.py": '__version__ = "1.0.0"\n\ndef main():\n    print(__version__)\n',
+    "package.json": '{\n  "name": "demo",\n  "version": "1.0.0"\n}\n',
+}
+
+
+def mirror_project(tmp: Path) -> Path:
+    return make_project(tmp, config=MIRROR_CONFIG, files=dict(MIRROR_FILES))
+
+
+@case("全部一致時 --check 通過，而且說得出檢查了幾個鏡像")
+def _(tmp: Path):
+    repo = mirror_project(tmp)
+    result = run(repo, "--check")
+    assert result.returncode == 0, result.stderr
+    assert "3 個鏡像一致" in result.stdout, result.stdout
+
+
+@case("--bump 一次同步所有鏡像（逐行樣板與 JSON 都要跟上）")
+def _(tmp: Path):
+    repo = mirror_project(tmp)
+    assert run(repo, "--bump", "minor").returncode == 0
+
+    assert (repo / "VERSION").read_text(encoding="utf-8").strip() == "1.1.0"
+    assert "**版本**：1.1.0" in (repo / "README.md").read_text(encoding="utf-8")
+    assert '__version__ = "1.1.0"' in (repo / "src" / "app.py").read_text(encoding="utf-8")
+    assert json.loads((repo / "package.json").read_text(encoding="utf-8"))["version"] == "1.1.0"
+
+
+@case("同步鏡像不會破壞檔案的其他內容")
+def _(tmp: Path):
+    repo = mirror_project(tmp)
+    run(repo, "--bump", "major")
+
+    readme = (repo / "README.md").read_text(encoding="utf-8")
+    assert "說明文字要留著。" in readme, readme
+    assert readme.startswith("# Demo"), readme
+
+    app = (repo / "src" / "app.py").read_text(encoding="utf-8")
+    assert "def main():" in app and "print(__version__)" in app, app
+    assert json.loads((repo / "package.json").read_text(encoding="utf-8"))["name"] == "demo"
+
+
+@case("鏡像漂掉時 --check 回 1，而且指得出是哪一個、現在寫的是什麼")
+def _(tmp: Path):
+    repo = mirror_project(tmp)
+    (repo / "README.md").write_text("# Demo\n\n**版本**：0.0.1\n", encoding="utf-8")
+
+    result = run(repo, "--check")
+    assert result.returncode == 1, result.stdout
+    combined = result.stdout + result.stderr
+    assert "README.md" in combined and "0.0.1" in combined, combined
+    assert "src/app.py" not in combined, f"沒漂的鏡像不該被列出來：{combined}"
+
+
+@case("漂掉時 --json 是 ok=false 並帶出 drifted 清單")
+def _(tmp: Path):
+    repo = mirror_project(tmp)
+    (repo / "package.json").write_text('{"name": "demo", "version": "9.9.9"}\n', encoding="utf-8")
+
+    result = run(repo, "--json")
+    assert result.returncode == 1, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False, payload
+    assert payload["version"] == "1.0.0", payload
+    assert payload["drifted"] == [{"file": "package.json", "found": "9.9.9"}], payload
+
+
+@case("鏡像找不到版本時，**任何地方都不會被寫入**（先全部確認再動手）")
+def _(tmp: Path):
+    repo = mirror_project(tmp)
+    # 把 README 的那一行整個拿掉：樣板不存在了，鏡像無處可寫。
+    (repo / "README.md").write_text("# Demo\n\n沒有版本那一行了。\n", encoding="utf-8")
+
+    result = run(repo, "--bump", "patch")
+    assert result.returncode == 1, result.stdout
+
+    assert (repo / "VERSION").read_text(encoding="utf-8").strip() == "1.0.0", (
+        "主要來源被寫進去了——寫到一半失敗會留下各處不一致的狀態"
+    )
+    assert '__version__ = "1.0.0"' in (repo / "src" / "app.py").read_text(encoding="utf-8"), (
+        "其他鏡像被寫進去了"
+    )
+    assert json.loads((repo / "package.json").read_text(encoding="utf-8"))["version"] == "1.0.0"
+
+
+@case("鏡像不會自己插一行進去，而是明講找不到樣板")
+def _(tmp: Path):
+    repo = mirror_project(tmp)
+    (repo / "README.md").write_text("# Demo\n", encoding="utf-8")
+    result = run(repo, "--set", "2.0.0")
+    combined = result.stdout + result.stderr
+    assert "找不到版本號" in combined or "找不到樣板" in combined, combined
+    assert "**版本**" not in (repo / "README.md").read_text(encoding="utf-8"), "竟然自己加了一行"
+
+
+@case("pattern 裡的正則特殊字元被當成字面文字（`[`、`.`、`*` 不會變成萬用）")
+def _(tmp: Path):
+    repo = make_project(
+        tmp,
+        config={"version": {"file": "VERSION", "mirrors": [
+            {"file": "app.ini", "pattern": "[app] ver=v{version} (stable)"},
+        ]}},
+        files={"VERSION": "1.0.0\n", "app.ini": "[app] ver=v1.0.0 (stable)\n"},
+    )
+    assert run(repo, "--check").returncode == 0, run(repo, "--check").stderr
+    assert run(repo, "--bump", "patch").returncode == 0
+    assert (repo / "app.ini").read_text(encoding="utf-8").strip() == "[app] ver=v1.0.1 (stable)"
+
+
+@case("設定驗證：pattern 要有剛好一個 {version}，而且不能同時給 format")
+def _(tmp: Path):
+    bad_patterns = [
+        {"file": "README.md", "pattern": "沒有佔位符"},
+        {"file": "README.md", "pattern": "{version} 又一個 {version}"},
+        {"file": "README.md", "pattern": "版本 {version}", "format": "json"},
+    ]
+    for index, mirror in enumerate(bad_patterns):
+        repo = make_project(
+            tmp / f"bad{index}",
+            config={"version": {"file": "VERSION", "mirrors": [mirror]}},
+            files={"VERSION": "1.0.0\n"},
+        )
+        result = run(repo, "--check")
+        assert result.returncode == 1, f"{mirror} 竟然被接受：{result.stdout}"
+
+
+@case("設定驗證：mirrors 不是陣列、或項目缺 file 時 fail-closed")
+def _(tmp: Path):
+    for index, bad in enumerate(["不是陣列", [{"pattern": "{version}"}], [{"file": "", }]]):
+        repo = make_project(
+            tmp / f"shape{index}",
+            config={"version": {"file": "VERSION", "mirrors": bad}},
+            files={"VERSION": "1.0.0\n"},
+        )
+        result = run(repo, "--check")
+        assert result.returncode == 1, f"{bad!r} 竟然被接受：{result.stdout}"
+
 
 
 def main() -> int:

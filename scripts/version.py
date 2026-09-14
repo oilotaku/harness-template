@@ -18,6 +18,10 @@
   implementer 對它的寫入動作。
 - **每個 session 開始都會報告目前版本**（`guard-selfcheck.py`），
   沒有版本號時會明講。「這個專案沒在管版本」不該是無聲的。
+- **版本要不必跑工具就看得到**，所以它會同時出現在 README、程式的 `--version`
+  輸出、套件 manifest……而只要出現在兩個以上的地方，它就會漂。所以那些地方
+  也要宣告成 `version.mirrors`，由這支腳本**一起檢查、一起更新**。
+  README 上一個過期的版本號比沒有版本號更糟——它看起來是可信的。
 
 ## 這支腳本刻意不做的事
 
@@ -30,7 +34,7 @@
 
     python3 scripts/version.py                      # 顯示目前版本
     python3 scripts/version.py --json               # 機器可讀
-    python3 scripts/version.py --check              # 有版本且合法才 exit 0
+    python3 scripts/version.py --check              # 版本合法、且所有鏡像一致才 exit 0
     python3 scripts/version.py --init               # 沒有版本檔時建立（0.1.0）
     python3 scripts/version.py --bump patch         # 0.1.0 -> 0.1.1
     python3 scripts/version.py --set 1.2.3          # 直接指定
@@ -134,6 +138,16 @@ def _nested_set(data, dotted_key: str, value) -> None:
     current[segments[-1]] = value
 
 
+def _line_regex(pattern: str):
+    """把一行的字面樣板變成正則。`{version}` 以外的部分全部視為字面文字。
+
+    版本字串不含空白，所以中間用 `\S+`：`__version__ = "{version}"` 這種
+    前後有字面引號的樣板，靠回溯就會正確停在收尾引號之前。
+    """
+    head, tail = pattern.split("{version}", 1)
+    return re.compile(re.escape(head) + r"(\S+)" + re.escape(tail))
+
+
 def _toml_version_line(lines, section):
     """回傳 `version = "..."` 那一行的索引，找不到回 None。
 
@@ -153,8 +167,17 @@ def _toml_version_line(lines, section):
     return None
 
 
+def locations(settings: dict) -> list:
+    """所有寫著版本的地方，主要來源排第一。
+
+    鏡像跟主要來源是同一個形狀，所以下面的 read/write 不必分兩套——
+    分兩套的話，遲早會有一邊支援某個格式而另一邊不支援。
+    """
+    return [settings] + list(settings.get("mirrors") or [])
+
+
 def read_version(root: Path, settings: dict):
-    """回傳版本字串；版本檔不存在或裡面沒有版本欄位時回 None。"""
+    """回傳版本字串；位置不存在或裡面沒有版本欄位時回 None。"""
     path = root / settings["file"]
     if not path.is_file():
         return None
@@ -163,6 +186,10 @@ def read_version(root: Path, settings: dict):
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise VersionError(f"讀不到版本檔「{settings['file']}」：{exc}") from exc
+
+    if settings["format"] == "line":
+        found = _line_regex(settings["pattern"]).search(text)
+        return found.group(1).strip() if found and found.group(1).strip() else None
 
     if settings["format"] == "plain":
         return text.strip() or None
@@ -186,6 +213,22 @@ def read_version(root: Path, settings: dict):
 def write_version(root: Path, settings: dict, version: str) -> Path:
     parse(version)  # 寫進去之前先擋下不合法的值
     path = root / settings["file"]
+
+    if settings["format"] == "line":
+        if not path.is_file():
+            raise VersionError(f"「{settings['file']}」不存在，無法更新版本。")
+        text = path.read_text(encoding="utf-8")
+        regex = _line_regex(settings["pattern"])
+        if not regex.search(text):
+            raise VersionError(
+                f"在「{settings['file']}」裡找不到樣板「{settings['pattern']}」。"
+                "鏡像只更新「已經寫著版本的地方」，不會自己插一行進去——"
+                "那會把版本號放到沒人預期的位置。"
+            )
+        # 用函式當 replacement：樣板裡的反斜線不該被當成正則的跳脫序列。
+        replacement = settings["pattern"].replace("{version}", version)
+        path.write_text(regex.sub(lambda _m: replacement, text, count=1), encoding="utf-8")
+        return path
 
     if settings["format"] == "plain":
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -229,11 +272,46 @@ def write_version(root: Path, settings: dict, version: str) -> Path:
     return path
 
 
+# ------------------------------------------------------------------ 一致性
+
+
+def survey(root: Path, settings: dict) -> list:
+    """每個寫著版本的地方目前是什麼值。回傳 [(位置, 值或 None)]，主要來源排第一。"""
+    return [(loc, read_version(root, loc)) for loc in locations(settings)]
+
+
+def drifted(root: Path, settings: dict, expected: str) -> list:
+    """跟主要來源不一致的鏡像。回傳 [(位置, 目前的值或 None)]。"""
+    return [(loc, value) for loc, value in survey(root, settings)[1:] if value != expected]
+
+
+def sync(root: Path, settings: dict, version: str) -> list:
+    """把版本寫進所有位置，回傳實際寫過的位置。
+
+    先把每個鏡像都確認找得到，再開始寫。寫到一半才發現某個鏡像的樣板不存在，
+    會留下「版本號各處不一致」的狀態——而那正是這整個機制要消滅的東西。
+    """
+    targets = locations(settings)
+    for loc in targets[1:]:
+        if read_version(root, loc) is None:
+            raise VersionError(
+                f"鏡像 {describe(loc)} 目前找不到版本號，所以**任何地方都還沒被寫入**。"
+                "鏡像只更新「已經寫著版本的位置」，不會自己插一行進去——"
+                "那會把版本號放到沒人預期的地方。請先在那裡放一個版本號，"
+                "或把它從 harness.config.json 的 version.mirrors 移除。"
+            )
+    for loc in targets:
+        write_version(root, loc, version)
+    return targets
+
+
 # ------------------------------------------------------------------ CLI
 
 
 def describe(settings: dict) -> str:
     target = settings["file"]
+    if settings["format"] == "line":
+        return f"{target}（`{settings['pattern']}`）"
     if settings["format"] == "json":
         return f"{target}（JSON 的 `{settings['key']}`）"
     if settings["format"] == "toml":
@@ -246,7 +324,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="讀寫產出專案的版本號（semver）")
     parser.add_argument("--json", action="store_true", help="機器可讀輸出")
     parser.add_argument("--check", action="store_true",
-                        help="有版本號且合法才 exit 0；沒有或不合法 exit 1")
+                        help="版本號存在、合法、且所有鏡像一致才 exit 0，否則 exit 1")
     parser.add_argument("--init", action="store_true",
                         help=f"沒有版本號時建立（{INITIAL_VERSION}）；已經有就什麼都不做")
     parser.add_argument("--bump", choices=BUMP_LEVELS, help="升版")
@@ -274,7 +352,7 @@ def main() -> int:
                 new_version = current
                 changed = False
             else:
-                write_version(root, settings, INITIAL_VERSION)
+                sync(root, settings, INITIAL_VERSION)
                 new_version = INITIAL_VERSION
                 changed = True
         elif args.bump:
@@ -284,11 +362,11 @@ def main() -> int:
                     "先跑 `python3 scripts/version.py --init`。"
                 )
             new_version = bump(current, args.bump)
-            write_version(root, settings, new_version)
+            sync(root, settings, new_version)
             changed = True
         elif args.set_to:
             new_version = args.set_to.strip()
-            write_version(root, settings, new_version)
+            sync(root, settings, new_version)
             changed = True
         else:
             new_version = current
@@ -320,22 +398,44 @@ def main() -> int:
             print(message)
         return 1
 
+    # 寫入路徑剛剛才同步過，不必再驗；讀取路徑才需要問「其他地方跟得上嗎」。
+    bad = [] if changed else drifted(root, settings, new_version)
+
     if args.json:
-        payload = {"ok": True, "version": new_version, "source": settings["file"],
-                   "format": settings["format"], "changed": changed}
+        payload = {"ok": not bad, "version": new_version, "source": settings["file"],
+                   "format": settings["format"], "changed": changed,
+                   "mirrors": len(settings.get("mirrors") or [])}
         if changed and current:
             payload["previous"] = current
+        if bad:
+            payload["reason"] = "版本號在不同地方不一致"
+            payload["drifted"] = [
+                {"file": loc["file"], "found": value} for loc, value in bad
+            ]
         print(json.dumps(payload, ensure_ascii=False))
-        return 0
+        return 1 if bad else 0
 
+    if bad:
+        print(f"❌ 版本號漂掉了：主要來源 {describe(settings)} 是 {new_version}，但", file=sys.stderr)
+        for loc, value in bad:
+            found = f"「{value}」" if value else "找不到版本號"
+            print(f"   - {describe(loc)} 是 {found}", file=sys.stderr)
+        print("   不必跑工具就看得到的那些地方，現在寫的是錯的版本——"
+              "那比沒有版本號更糟，因為它看起來是可信的。", file=sys.stderr)
+        print(f"   全部同步過去：python3 scripts/version.py --set {new_version}", file=sys.stderr)
+        return 1
+
+    mirror_count = len(settings.get("mirrors") or [])
+    also = f"，並同步了 {mirror_count} 個鏡像" if changed and mirror_count else ""
     if changed and current and current != new_version:
-        print(f"{current} → {new_version}（寫進 {describe(settings)}）")
+        print(f"{current} → {new_version}（寫進 {describe(settings)}{also}）")
     elif changed:
-        print(f"{new_version}（寫進 {describe(settings)}）")
+        print(f"{new_version}（寫進 {describe(settings)}{also}）")
     elif args.init:
         print(f"{new_version}（已經有版本號，沒有改動）")
     elif args.check:
-        print(f"版本號正常：{new_version}（來源 {describe(settings)}）")
+        suffix = f"，{mirror_count} 個鏡像一致" if mirror_count else ""
+        print(f"版本號正常：{new_version}（來源 {describe(settings)}{suffix}）")
     else:
         print(new_version)
     return 0

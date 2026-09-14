@@ -45,6 +45,30 @@ Go / Rust / 純腳本專案常常就是一個 `VERSION` 檔。
 | `json` | JSON 檔的某個鍵（`key` 可用點號指巢狀路徑，預設 `version`） | `package.json` |
 | `toml` | `version = "x.y.z"` 這一行（可用 `section` 限定段落） | `pyproject.toml` |
 
+### `version.mirrors`：版本還寫在哪些地方
+
+版本號應該讓人**不必跑任何工具就看得到**——README 上一行、程式的 `--version`
+輸出、套件 manifest。但只要版本同時出現在兩個以上的地方，它就會漂，
+而 README 上一個過期的版本號比沒有版本號更糟。
+
+所以「還寫在哪裡」也要宣告出來，由 `scripts/version.py` 一起檢查、一起更新：
+
+```json
+{
+  "version": {
+    "file": "VERSION",
+    "mirrors": [
+      { "file": "README.md", "pattern": "**版本**：{version}" },
+      { "file": "src/app.py", "pattern": "__version__ = \"{version}\"" },
+      { "file": "package.json", "format": "json", "key": "version" }
+    ]
+  }
+}
+```
+
+`pattern` 是一行的字面樣板，裡面要有**剛好一個** `{version}`；其餘欄位跟主要來源
+完全一樣（`format` / `key` / `section`），因為鏡像本來就只是「另一個寫著版本的地方」。
+
 版本號一律是 semver `x.y.z`（見 `scripts/version.py`）。
 **版本檔由 `scripts/version.py` 讀寫，implementer 不可以自己改**——
 理由跟已鎖定的公開測試一樣：它是治理資訊，不是實作的一部分。
@@ -126,7 +150,7 @@ def _validate_version(value) -> dict:
     if not isinstance(value, dict):
         raise ConfigError(f"`version` 必須是物件（目前是 {type(value).__name__}）。")
 
-    known = {"file", "format", "key", "section"}
+    known = {"file", "format", "key", "section", "mirrors"}
     unknown = [k for k in value if k not in known and not k.startswith("$")]
     if unknown:
         raise ConfigError(
@@ -161,7 +185,81 @@ def _validate_version(value) -> dict:
         "format": format_value,
         "key": key_value.strip(),
         "section": section.strip() if isinstance(section, str) else None,
+        "pattern": None,
+        "mirrors": _validate_mirrors(value.get("mirrors")),
     }
+
+
+def _validate_mirrors(value) -> list:
+    """驗證 `version.mirrors`：版本號還寫在哪些「不必跑工具就看得到」的地方。
+
+    每一筆跟主要來源同一個形狀，額外多一個 `pattern`（一行的字面樣板）。
+    這裡驗得嚴是刻意的：鏡像設定寫錯如果只是被忽略，結果會是「以為有在同步、
+    其實沒有」——那正是漂移本身，而漂掉的版本號比沒有版本號更糟。
+    """
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ConfigError(f"`version.mirrors` 必須是陣列（目前是 {type(value).__name__}）。")
+
+    known = {"file", "format", "key", "section", "pattern"}
+    mirrors = []
+    for index, item in enumerate(value):
+        where = f"`version.mirrors[{index}]`"
+        if not isinstance(item, dict):
+            raise ConfigError(f"{where} 必須是物件（目前是 {type(item).__name__}）。")
+        unknown = [k for k in item if k not in known and not k.startswith("$")]
+        if unknown:
+            raise ConfigError(f"{where} 有無法辨識的欄位：{unknown}。可用欄位：{sorted(known)}。")
+
+        file_value = item.get("file")
+        if not isinstance(file_value, str) or not file_value.strip():
+            raise ConfigError(f"{where} 的 `file` 必須是非空字串。")
+        normalized = file_value.strip().replace("\\", "/").strip("/")
+        if not normalized or normalized == "." or normalized.startswith(".."):
+            raise ConfigError(f"{where} 的「{file_value}」不是 repo 內的相對路徑。")
+        if Path(normalized).is_absolute():
+            raise ConfigError(f"{where} 的「{file_value}」必須是相對於 repo 根目錄的路徑。")
+
+        pattern = item.get("pattern")
+        if pattern is not None:
+            if not isinstance(pattern, str) or not pattern.strip():
+                raise ConfigError(f"{where} 的 `pattern` 必須是非空字串。")
+            if pattern.count("{version}") != 1:
+                raise ConfigError(
+                    f"{where} 的 `pattern` 要有剛好一個 {{version}}，"
+                    f"目前有 {pattern.count('{version}')} 個。"
+                )
+            if "format" in item and item["format"] != "line":
+                raise ConfigError(
+                    f"{where} 同時給了 `pattern` 與 `format`。有 `pattern` 就是逐行樣板，"
+                    "不需要再指定格式。"
+                )
+            format_value = "line"
+        else:
+            format_value = item.get("format", DEFAULT_VERSION_FORMAT)
+            if format_value not in VERSION_FORMATS:
+                raise ConfigError(
+                    f"{where} 的 `format` 必須是 {list(VERSION_FORMATS)} 其中之一"
+                    "，或改用 `pattern`。"
+                )
+
+        key_value = item.get("key", DEFAULT_VERSION_KEY)
+        if not isinstance(key_value, str) or not key_value.strip():
+            raise ConfigError(f"{where} 的 `key` 必須是非空字串。")
+
+        section = item.get("section")
+        if section is not None and (not isinstance(section, str) or not section.strip()):
+            raise ConfigError(f"{where} 的 `section` 若有指定，必須是非空字串。")
+
+        mirrors.append({
+            "file": normalized,
+            "format": format_value,
+            "key": key_value.strip(),
+            "section": section.strip() if isinstance(section, str) else None,
+            "pattern": pattern,
+        })
+    return mirrors
 
 
 def load(root: Path = None) -> dict:
@@ -178,6 +276,8 @@ def load(root: Path = None) -> dict:
             "format": DEFAULT_VERSION_FORMAT,
             "key": DEFAULT_VERSION_KEY,
             "section": None,
+            "pattern": None,
+            "mirrors": [],
         },
         "_source": "預設值（沒有 harness.config.json）",
     }

@@ -82,6 +82,12 @@ frontmatter 的 `thinking` 欄位**不會被 Claude Code 讀取**，它只是本
      （`--kind bugfix` 的 task 天然落在 PATCH）。
    - 用 `python3 scripts/version.py --bump <層級>`，不要用 Write/Edit 直接改版本檔——
      guard 會擋（那條規則是為了擋 implementer，對你也一樣生效）。
+   - **版本要讓人不必跑工具就看得到**：README、程式自己的輸出（CLI `--version`、
+     服務的 `/version` 或啟動日誌、UI 的關於頁，至少一個）、套件 manifest。
+     把這些位置宣告成 `harness.config.json` 的 `version.mirrors`，`--bump` 才會
+     一起更新；沒宣告的地方會漂，而過期的版本號比沒有版本號更糟。
+   - 專案第一次建立時，**把「程式要能自報版本」寫成一條驗收標準**放進對應的
+     task-spec（怎麼報依語言而定，所以這是 task-spec 的事，不是腳本能代勞的）。
 
 5. **模型與思考層級指派**（依 `docs/model-thinking-matrix.md`）
    - 依任務複雜度、風險等級，替每個 task 標註要用哪個模型、思考層級多高。
