@@ -2,6 +2,8 @@
 
 - **檢驗者**：（verifier-reviewer / verifier-security）
 - **對應 task_id**：
+- **驗收當下的產出版本**：（`python3 scripts/version.py` 的輸出；
+  之後要查「這個修正在哪一版」就靠它）
 - **結論**：（通過 / 不通過 —— 不可有模糊地帶）
 
 ## 驗收標準逐條對照

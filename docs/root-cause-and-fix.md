@@ -107,6 +107,10 @@
 - 更新 `.harness/progress/<task_id>.md`。
 - 若這個根因反映的是流程或規格層級的問題（不是單純寫錯），
   由 **Orchestrator** 依 `memory-management.md` §3 判斷要不要寫進記憶。
+- 這一批修正發布出去時，由 **Orchestrator** 升 PATCH
+  （`python3 scripts/version.py --bump patch`，見 `docs/versioning.md`）。
+  沒有版本號的話，「這個我修過了」就是一句無法查證的話——使用者不知道自己手上
+  那份有沒有含這個修正。
 
 ---
 

@@ -77,6 +77,9 @@ jobs:
       - name: 驗收嘗試次數回歸測試（停損靠 runner 記錄，不靠自我申報）
         run: python scripts/test-attempts.py
 
+      - name: 產出專案版本號回歸測試（三種來源都不破壞檔案、implementer 改不到）
+        run: python scripts/test-version.py
+
       - name: 在非 UTF-8 locale 下重跑（Linux 就能抓到編碼 bug，不用等 Windows）
         if: runner.os == 'Linux'
         env:
@@ -93,6 +96,7 @@ jobs:
           python -X utf8=0 scripts/test-timing.py
           python -X utf8=0 scripts/test-skills.py
           python -X utf8=0 scripts/test-attempts.py
+          python -X utf8=0 scripts/test-version.py
 
       - name: 範例流程仍可重跑
         working-directory: templates/examples/demo-fizzbuzz

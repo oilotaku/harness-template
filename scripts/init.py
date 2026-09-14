@@ -32,6 +32,9 @@ STEPS = [
     ("機器效能掃描", "machine-profile.py", "machine"),
     ("既有服務掃描", "service-scan.py", "services"),
     ("環境指紋建立/比對", "env-guard.py", "env_guard"),
+    # 版本號是產出專案自己的狀態，不是機器狀態，但 Orchestrator 在同一個時機需要它：
+    # 拆解任務時要知道現在是哪一版，驗收後才知道該升到哪一版。
+    ("產出專案的版本號", "version.py", "version"),
 ]
 
 

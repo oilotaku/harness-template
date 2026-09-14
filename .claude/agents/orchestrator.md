@@ -70,6 +70,19 @@ frontmatter 的 `thinking` 欄位**不會被 Claude Code 讀取**，它只是本
    - bug 修正一律開**新的 task_id**，不要重新封存原本那個 task——重封會換權杖，
      也會把兩次驗收的嘗試次數混在一起，而那個計數是停損判斷的依據。
 
+   **產出專案的版本號（只有你能改，見 `docs/versioning.md`）**
+   - 目前版本從 `init.py --json` 的 `sections.version` 就讀得到，不用另外問使用者。
+   - 顯示「這個專案還沒有版本號」時，**派工之前**先建立：
+     `python3 scripts/version.py --init`。沒有版本號的話，之後使用者回報問題
+     沒有任何東西可以定位是哪一版。
+   - **一批需求全部驗收通過、commit 之後**升一次版，不是每個 task 升一次——
+     使用者看到的是一個發布，不是你的任務拆解。
+   - 升哪一位看**使用者那一側**：既有呼叫方不改任何東西還能照舊運作嗎？
+     不能 → MAJOR；新增功能且相容 → MINOR；只有 bug 修正 → PATCH
+     （`--kind bugfix` 的 task 天然落在 PATCH）。
+   - 用 `python3 scripts/version.py --bump <層級>`，不要用 Write/Edit 直接改版本檔——
+     guard 會擋（那條規則是為了擋 implementer，對你也一樣生效）。
+
 5. **模型與思考層級指派**（依 `docs/model-thinking-matrix.md`）
    - 依任務複雜度、風險等級，替每個 task 標註要用哪個模型、思考層級多高。
 
