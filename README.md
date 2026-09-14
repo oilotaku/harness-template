@@ -116,8 +116,8 @@ OS 使用者」的子智能體——權杖會經過 Claude Code 的 transcript�
 | `.claude/agents/` | 子智能體定義（Orchestrator 1 個、實作者 3 個、檢驗者 3 個） |
 | `.claude/commands/` | `/task-plan` `/task-dispatch` `/machine-check` 斜線指令（用法見下） |
 | `scripts/` | 掃描、防作弊機制本體、決策輔助工具（見下面兩張表） |
-| `docs/` | **從零開始套用**、任務拆解、模型/思考分配、實作/檢驗分離、多語言支援、記憶管理、token 成本策略、根因分析與修正流程、**版本號**、執行時間預測、skill 安裝決策 |
-| `templates/` | task-spec、驗收報告、驗收標準對照表範本（含 `examples/` 的完整範例） |
+| `docs/` | **從零開始套用**、任務拆解、模型/思考分配、實作/檢驗分離、多語言支援、記憶管理、token 成本策略、根因分析與修正流程、**使用者回報處理**、**版本號**、執行時間預測、skill 安裝決策 |
+| `templates/` | task-spec、驗收報告、驗收標準對照表、**使用者回報單**範本（含 `examples/` 的完整範例） |
 | `reports/` | 驗收報告落檔處（檢驗者沒有 `Write` 工具，由 Orchestrator 落檔） |
 | `releases/` | 每個版本一個資料夾，存放那一版的完整原始碼（升版時自動產生，可關掉；見 `docs/versioning.md` §4.5） |
 | `harness.config.json` | （選用）這個專案的測試路徑慣例、版本號來源與顯示位置；非 Python 專案要設 |
