@@ -3,6 +3,12 @@
 ## 基本資訊
 
 - **task_id**：
+- **來源**：（三選一。bug 修正 task 少了這一欄，之後沒有人說得出 `BUG-003` 在修什麼）
+  - `新需求`
+  - `使用者回報` → 回報單：______（見 `docs/user-reports.md`）
+  - `bug 修正` → 這個 bug 出在哪個 task 的產出：______（查不到就寫「未知」）；
+    這類 task 的測試要走 `docs/root-cause-and-fix.md` §1.5 的公開/隱藏拆法，
+    封存時加 `--kind bugfix`
 - **layer**：（資料層 / API 層 / UI 層 / 腳本 / 其他）
 - **language**：
 - **framework**：
