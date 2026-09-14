@@ -457,6 +457,177 @@ def _(tmp: Path):
 
 
 
+# ------------------------------------ 版本歸檔：每個版本各開一個資料夾存放原始碼
+
+
+def archive_project(tmp: Path, config=None) -> Path:
+    """一個有原始碼、也有「絕對不能被快照進去」那些東西的最小專案。"""
+    repo = make_project(tmp, config=config, files={
+        "VERSION": "1.0.0\n",
+        "README.md": "# Demo\n",
+        "src/app.py": "print('hi')\n",
+        # 以下都不該出現在快照裡
+        "tests/hidden/test_secret.py": "# 題目，洩出去整套機制就失效\n",
+        "node_modules/junk.js": "x\n",
+        ".harness/state.json": "{}\n",
+    })
+    return repo
+
+
+def snapshot_files(repo: Path, version: str, base: str = "releases") -> list:
+    root = repo / base / version
+    return sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file())
+
+
+@case("升版會把原始碼另存成 releases/<版本>/")
+def _(tmp: Path):
+    repo = archive_project(tmp)
+    result = run(repo, "--bump", "minor")
+    assert result.returncode == 0, result.stderr
+    assert (repo / "releases" / "1.1.0").is_dir(), result.stdout
+
+    files = snapshot_files(repo, "1.1.0")
+    assert "src/app.py" in files and "README.md" in files, files
+
+
+@case("隱藏測試暫存區**絕對不會**被快照進去（進去等於從歸檔資料夾洩題）")
+def _(tmp: Path):
+    repo = archive_project(tmp)
+    run(repo, "--bump", "patch")
+
+    files = snapshot_files(repo, "1.0.1")
+    leaked = [f for f in files if "hidden" in f]
+    assert not leaked, f"隱藏測試被快照進去了：{leaked}"
+
+
+@case("建置產物與治理目錄不進快照（node_modules / .harness / .git）")
+def _(tmp: Path):
+    repo = archive_project(tmp)
+    run(repo, "--bump", "patch")
+
+    files = snapshot_files(repo, "1.0.1")
+    for unwanted in ("node_modules", ".harness", ".git"):
+        assert not any(f.startswith(unwanted) for f in files), f"{unwanted} 進去了：{files}"
+
+
+@case("歸檔目錄不會遞迴把自己複製進去")
+def _(tmp: Path):
+    repo = archive_project(tmp)
+    run(repo, "--bump", "patch")
+    run(repo, "--bump", "patch")
+
+    files = snapshot_files(repo, "1.0.2")
+    assert not any(f.startswith("releases") for f in files), f"遞迴了：{files}"
+
+
+@case("快照裡的版本號是**新版**，不是升版前那個")
+def _(tmp: Path):
+    repo = archive_project(tmp)
+    run(repo, "--bump", "major")
+    archived = (repo / "releases" / "2.0.0" / "VERSION").read_text(encoding="utf-8").strip()
+    assert archived == "2.0.0", f"快照裡寫的是 {archived}"
+
+
+@case("同一版重複歸檔被拒絕，而且說得出為什麼")
+def _(tmp: Path):
+    repo = archive_project(tmp)
+    run(repo, "--bump", "minor")
+    marker = repo / "releases" / "1.1.0" / "src" / "app.py"
+    original = marker.read_text(encoding="utf-8")
+
+    result = run(repo, "--set", "1.1.0")
+    assert result.returncode == 1, result.stdout
+    assert marker.read_text(encoding="utf-8") == original, "已發布版本的快照被覆蓋了"
+
+
+@case("--no-archive 只升版不歸檔；--init 本來就不歸檔")
+def _(tmp: Path):
+    repo = archive_project(tmp)
+    assert run(repo, "--bump", "patch", "--no-archive").returncode == 0
+    assert not (repo / "releases").exists(), "--no-archive 還是建了資料夾"
+
+    fresh = make_project(tmp / "fresh")
+    assert run(fresh, "--init").returncode == 0
+    assert not (fresh / "releases").exists(), "--init 不該歸檔（那時還沒有程式碼）"
+
+
+@case("archive: false 關掉歸檔；archive.dir 可以改地方")
+def _(tmp: Path):
+    off = archive_project(tmp / "off", config={"version": {"file": "VERSION", "archive": False}})
+    assert run(off, "--bump", "patch").returncode == 0
+    assert not (off / "releases").exists(), "設成 false 卻還是歸檔了"
+
+    moved = archive_project(
+        tmp / "moved",
+        config={"version": {"file": "VERSION", "archive": {"dir": "snapshots"}}},
+    )
+    assert run(moved, "--bump", "patch").returncode == 0
+    assert (moved / "snapshots" / "1.0.1").is_dir(), "自訂目錄沒有生效"
+    assert not (moved / "releases").exists()
+
+
+@case("archive.exclude 可以再排除專案自己的目錄")
+def _(tmp: Path):
+    repo = archive_project(
+        tmp,
+        config={"version": {"file": "VERSION",
+                            "archive": {"dir": "releases", "exclude": ["src"]}}},
+    )
+    run(repo, "--bump", "patch")
+    files = snapshot_files(repo, "1.0.1")
+    assert not any(f.startswith("src") for f in files), files
+    assert "README.md" in files, files
+
+
+@case("每個歸檔都有 .release-meta.json，記著版本與檔案數")
+def _(tmp: Path):
+    repo = archive_project(tmp)
+    run(repo, "--bump", "patch")
+    meta = json.loads(
+        (repo / "releases" / "1.0.1" / ".release-meta.json").read_text(encoding="utf-8")
+    )
+    assert meta["version"] == "1.0.1", meta
+    assert meta["file_count"] >= 3, meta
+    assert "created_at" in meta, meta
+
+
+@case("--json 帶出歸檔路徑")
+def _(tmp: Path):
+    repo = archive_project(tmp)
+    payload = json.loads(run(repo, "--bump", "patch", "--json").stdout)
+    assert payload["archived"] == "releases/1.0.1", payload
+
+
+@case("歸檔設定壞掉時 fail-closed（archive 不是物件也不是 false）")
+def _(tmp: Path):
+    repo = archive_project(tmp, config={"version": {"file": "VERSION", "archive": "yes"}})
+    result = run(repo, "--check")
+    assert result.returncode == 1, result.stdout
+
+
+@case("guard 擋下對歸檔的寫入，但不擋讀取（比對舊版是正當用途）")
+def _(tmp: Path):
+    repo = archive_project(tmp)
+    run(repo, "--bump", "patch")
+
+    blocked = [
+        {"tool_name": "Write", "tool_input": {"file_path": "releases/1.0.1/src/app.py"}},
+        {"tool_name": "Edit", "tool_input": {"file_path": "releases/1.0.1/VERSION"}},
+        {"tool_name": "Bash", "tool_input": {"command": "rm -rf releases/1.0.1"}},
+    ]
+    for payload in blocked:
+        assert guard(repo, payload) == 2, f"沒有擋下：{payload}"
+
+    allowed = [
+        {"tool_name": "Read", "tool_input": {"file_path": "releases/1.0.1/src/app.py"}},
+        {"tool_name": "Bash", "tool_input": {"command": "diff releases/1.0.1/src/app.py src/app.py"}},
+        {"tool_name": "Write", "tool_input": {"file_path": "releases-notes.md"}},
+    ]
+    for payload in allowed:
+        assert guard(repo, payload) == 0, f"誤擋：{payload}"
+
+
+
 def main() -> int:
     failures = []
     with tempfile.TemporaryDirectory() as base:

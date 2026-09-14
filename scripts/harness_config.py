@@ -150,7 +150,7 @@ def _validate_version(value) -> dict:
     if not isinstance(value, dict):
         raise ConfigError(f"`version` 必須是物件（目前是 {type(value).__name__}）。")
 
-    known = {"file", "format", "key", "section", "mirrors"}
+    known = {"file", "format", "key", "section", "mirrors", "archive"}
     unknown = [k for k in value if k not in known and not k.startswith("$")]
     if unknown:
         raise ConfigError(
@@ -187,7 +187,47 @@ def _validate_version(value) -> dict:
         "section": section.strip() if isinstance(section, str) else None,
         "pattern": None,
         "mirrors": _validate_mirrors(value.get("mirrors")),
+        "archive": _validate_archive(value.get("archive")),
     }
+
+
+def _validate_archive(value):
+    """驗證 `version.archive`：每個版本各開一個資料夾存放完整原始碼。
+
+    `false` 代表關掉；沒給就是預設開啟、放在 `releases/`。
+    """
+    if value is None:
+        return None
+    if value is False:
+        return False
+    if not isinstance(value, dict):
+        raise ConfigError(
+            f"`version.archive` 必須是物件或 false（目前是 {type(value).__name__}）。"
+        )
+
+    known = {"dir", "exclude"}
+    unknown = [k for k in value if k not in known and not k.startswith("$")]
+    if unknown:
+        raise ConfigError(
+            f"`version.archive` 有無法辨識的欄位：{unknown}。可用欄位：{sorted(known)}。"
+        )
+
+    directory = value.get("dir", "releases")
+    if not isinstance(directory, str) or not directory.strip():
+        raise ConfigError("`version.archive.dir` 必須是非空字串。")
+    normalized = directory.strip().replace("\\", "/").strip("/")
+    if not normalized or normalized == "." or normalized.startswith(".."):
+        raise ConfigError(f"`version.archive.dir` 的「{directory}」不是 repo 內的相對路徑。")
+    if Path(normalized).is_absolute():
+        raise ConfigError(f"`version.archive.dir` 的「{directory}」必須是相對路徑。")
+
+    exclude = value.get("exclude", [])
+    if not isinstance(exclude, list) or any(
+        not isinstance(item, str) or not item.strip() for item in exclude
+    ):
+        raise ConfigError("`version.archive.exclude` 必須是非空字串的陣列。")
+
+    return {"dir": normalized, "exclude": [item.strip() for item in exclude]}
 
 
 def _validate_mirrors(value) -> list:
@@ -278,6 +318,7 @@ def load(root: Path = None) -> dict:
             "section": None,
             "pattern": None,
             "mirrors": [],
+            "archive": None,
         },
         "_source": "預設值（沒有 harness.config.json）",
     }

@@ -174,11 +174,21 @@ HIDDEN_TEST_PATTERNS = ["tests/hidden"]
 # （例如實作一個 `--version` 旗標），沒有正當理由改它。改版本號是 Orchestrator
 # 透過 `scripts/version.py` 做的事，見 docs/versioning.md。
 VERSION_FILE = "VERSION"
+
+# 版本歸檔目錄（每個版本一個資料夾，見 scripts/release_archive.py）。
+# 已發布版本的快照是唯讀的歷史：就地改掉它比沒有快照更糟——它看起來是那一版，
+# 其實不是。所以比照版本檔**只擋寫入、不擋讀取**（比對舊版行為是正當用途）。
+ARCHIVE_DIR = "releases"
 if harness_config is not None:
     try:
         _config = harness_config.load(REPO_ROOT)
         HIDDEN_TEST_PATTERNS = _config["hidden_test_paths"]
         VERSION_FILE = _config["version"]["file"]
+        _archive = _config["version"].get("archive")
+        if _archive is False:
+            ARCHIVE_DIR = None
+        elif isinstance(_archive, dict):
+            ARCHIVE_DIR = _archive["dir"]
     except BaseException as _exc:  # noqa: BLE001 — 設定壞掉一律 fail-closed
         _STARTUP_ERROR = _exc
 
@@ -395,10 +405,22 @@ def _is_version_file(rel) -> bool:
     return bool(rel) and bool(VERSION_FILE) and rel.rstrip("/") == VERSION_FILE
 
 
+def _is_archive_path(rel) -> bool:
+    if not rel or not ARCHIVE_DIR:
+        return False
+    target = rel.rstrip("/")
+    return target == ARCHIVE_DIR or target.startswith(ARCHIVE_DIR + "/")
+
+
 def _is_protected_write_target(rel, locked: set) -> bool:
     if not rel:
         return False
-    if _is_hidden_tests_path(rel) or _is_harness_path(rel) or _is_version_file(rel):
+    if (
+        _is_hidden_tests_path(rel)
+        or _is_harness_path(rel)
+        or _is_version_file(rel)
+        or _is_archive_path(rel)
+    ):
         return True
     return rel.rstrip("/") in locked
 
@@ -430,6 +452,13 @@ def _check_file_path(raw_path: str, locked: set, tool_name: str = None):
         return (
             f"拒絕：「{target}」屬於 harness 治理檔案（鎖定清單/環境指紋），"
             "不可由一般編輯動作寫入，只能由對應腳本（lock-tests.py / env-guard.py）產生。"
+        )
+
+    if _is_archive_path(target):
+        return (
+            f"拒絕：「{target}」屬於版本歸檔（已發布版本的原始碼快照），不可修改。"
+            "就地改掉一個已發布版本的快照，比沒有快照更糟——它看起來是那一版，其實不是。"
+            "歸檔由 `python3 scripts/version.py` 在升版時產生（讀它沒有問題，只有寫入被擋）。"
         )
 
     if _is_version_file(target):

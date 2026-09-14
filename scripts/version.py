@@ -38,6 +38,12 @@
     python3 scripts/version.py --init               # 沒有版本檔時建立（0.1.0）
     python3 scripts/version.py --bump patch         # 0.1.0 -> 0.1.1
     python3 scripts/version.py --set 1.2.3          # 直接指定
+    python3 scripts/version.py --archive            # 把目前版本另存成 releases/<版本>/
+    python3 scripts/version.py --bump patch --no-archive   # 這次不要歸檔
+
+升版時會把目前的原始碼另存一份到 `releases/<x.y.z>/`（見 scripts/release_archive.py，
+可用 harness.config.json 的 `version.archive` 調整或關掉）。`--init` 不歸檔——
+那時候還沒有任何程式碼，快照一個空專案只是雜訊。
 
 ## 該升哪一位（Orchestrator 的判準）
 
@@ -61,6 +67,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import harness_config  # noqa: E402
+import release_archive  # noqa: E402
 import utf8_output  # noqa: E402
 
 utf8_output.enable()  # Windows 主控台預設用 ANSI 代碼頁，不先切 UTF-8 會印不出中文
@@ -329,6 +336,10 @@ def main() -> int:
                         help=f"沒有版本號時建立（{INITIAL_VERSION}）；已經有就什麼都不做")
     parser.add_argument("--bump", choices=BUMP_LEVELS, help="升版")
     parser.add_argument("--set", dest="set_to", help="直接指定版本（x.y.z）")
+    parser.add_argument("--archive", action="store_true",
+                        help="把目前版本的原始碼另存成 releases/<版本>/（升版時本來就會做）")
+    parser.add_argument("--no-archive", dest="no_archive", action="store_true",
+                        help="這次升版不要歸檔")
 
     args = parser.parse_args()
 
@@ -336,10 +347,15 @@ def main() -> int:
     if sum(writes) > 1:
         print("--bump / --set / --init 一次只能給一個。", file=sys.stderr)
         return 2
+    if args.archive and args.no_archive:
+        print("--archive 與 --no-archive 互相矛盾。", file=sys.stderr)
+        return 2
 
     root = harness_config.repo_root()
     try:
-        settings = harness_config.load(root)["version"]
+        config = harness_config.load(root)
+        settings = config["version"]
+        archive_settings = release_archive.settings_of(config)
     except harness_config.ConfigError as exc:
         print(f"harness.config.json 有問題：{exc}", file=sys.stderr)
         return 1
@@ -383,6 +399,24 @@ def main() -> int:
             print(f"❌ {exc}", file=sys.stderr)
         return 1
 
+    # 歸檔：版本真的變了（--bump / --set）或使用者明確要求時才做。
+    # --init 刻意不做——那時還沒有任何程式碼，快照一個空專案只是雜訊。
+    archived = None
+    wants_archive = args.archive or (changed and not args.init)
+    if wants_archive and not args.no_archive and new_version is not None:
+        try:
+            archived = release_archive.create(root, archive_settings, new_version)
+        except (release_archive.ArchiveError, harness_config.ConfigError, OSError) as exc:
+            # 版本已經寫進去了，歸檔卻失敗——不可以默默吞掉，使用者會以為有那個資料夾。
+            if args.json:
+                print(json.dumps({"ok": False, "version": new_version,
+                                  "source": settings["file"], "changed": changed,
+                                  "reason": f"版本已更新，但歸檔失敗：{exc}"},
+                                 ensure_ascii=False))
+            else:
+                print(f"版本已更新為 {new_version}，但歸檔失敗：{exc}", file=sys.stderr)
+            return 1
+
     if new_version is None:
         message = (
             f"這個專案還沒有版本號（預期在 {describe(settings)}）。\n"
@@ -407,6 +441,8 @@ def main() -> int:
                    "mirrors": len(settings.get("mirrors") or [])}
         if changed and current:
             payload["previous"] = current
+        if archived and not archived.get("skipped"):
+            payload["archived"] = archived["path"]
         if bad:
             payload["reason"] = "版本號在不同地方不一致"
             payload["drifted"] = [
@@ -424,6 +460,9 @@ def main() -> int:
               "那比沒有版本號更糟，因為它看起來是可信的。", file=sys.stderr)
         print(f"   全部同步過去：python3 scripts/version.py --set {new_version}", file=sys.stderr)
         return 1
+
+    if archived and not archived.get("skipped"):
+        print(f"已歸檔：{archived['path']}/（{archived['file_count']} 個檔案）")
 
     mirror_count = len(settings.get("mirrors") or [])
     also = f"，並同步了 {mirror_count} 個鏡像" if changed and mirror_count else ""

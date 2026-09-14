@@ -125,6 +125,9 @@ SCAN_SKIP_DIRS = {
     ".git", ".harness", "node_modules", "venv", ".venv", "__pycache__",
     "target", "dist", "build", ".next", "vendor",
     "templates",  # 本模板自己的範例目錄，不是使用者的測試
+    # 版本歸檔裡有 tests/public 的副本。不跳過的話，這個掃描會把那些副本
+    # 當成「有測試但不在受保護路徑」而誤報——而誤報久了就會讓人忽略真的警告。
+    "releases",
 }
 
 
