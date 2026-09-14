@@ -23,11 +23,13 @@ SessionStart hook，hook 若在派工中途失效，只有這一步能讓 verifi
 """
 import argparse
 import fnmatch
+import hashlib
 import json
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -312,6 +314,70 @@ def check_locks() -> None:
         print("公開測試鎖定稽核：目前沒有可驗證的鎖定清單（尚未執行 lock-tests.py，屬正常起始狀態）。")
 
 
+def check_audit_scripts() -> bool:
+    """事後稽核腳本也要**實跑**一次，不是只看它在不在。
+
+    第三輪 P1-9：SessionStart 的自我檢查原本只涵蓋 guard 一支。實測把
+    `verify-locks.py`／`run-hidden-tests.py`／`hidden_vault.py` 各自換成
+    `sys.exit(0)`，這支腳本全部回報「一切正常」——**連它自己被換掉也一樣**。
+
+    這裡補上 `verify-locks.py` 的實跑驗證：在暫存目錄裡造一份「內容與雜湊
+    對得上」與一份「被竄改」的鎖定清單，斷言它分別回 0 與 1。作法跟上面對
+    guard 做的完全一樣——不看程式碼，看它在已知情境下的行為。
+
+    回傳 False 代表稽核腳本的行為不符預期（--strict 會據此回非零）。
+    """
+    if not VERIFY_LOCKS.exists():
+        print("⚠️ 事後稽核自我檢查：找不到 verify-locks.py——公開測試竄改目前**沒有人在稽核**。")
+        return False
+
+    def run_in(sandbox: Path) -> int:
+        return subprocess.run(
+            [sys.executable, str(VERIFY_LOCKS)],
+            text=True, encoding="utf-8", errors="replace",
+            capture_output=True,
+            cwd=str(sandbox),
+            env={**os.environ, "CLAUDE_PROJECT_DIR": str(sandbox)},
+        ).returncode
+
+    problems = []
+    try:
+        with tempfile.TemporaryDirectory() as base:
+            sandbox = Path(base)
+            test_file = sandbox / "tests" / "public" / "test_probe.py"
+            test_file.parent.mkdir(parents=True, exist_ok=True)
+            test_file.write_text("assert True\n", encoding="utf-8")
+            digest = hashlib.sha256(test_file.read_bytes()).hexdigest()
+            locked = sandbox / ".harness" / "locked-tests.list"
+            locked.parent.mkdir(parents=True, exist_ok=True)
+            locked.write_text(f"{digest}  tests/public/test_probe.py\n", encoding="utf-8")
+
+            intact = run_in(sandbox)
+            if intact != 0:
+                problems.append(f"未被竄改的清單應回 0，實際 {intact}")
+
+            test_file.write_text("assert False\n", encoding="utf-8")
+            tampered = run_in(sandbox)
+            if tampered != 1:
+                problems.append(f"被竄改的公開測試應回 1，實際 {tampered}")
+    except OSError as exc:
+        print(f"事後稽核自我檢查：無法建立暫存情境（{exc}），本次略過。")
+        return True
+
+    if problems:
+        print(f"⚠️ 事後稽核自我檢查：**verify-locks.py 的行為不符預期**（{len(problems)} 項）：")
+        for item in problems:
+            print(f"  - {item}")
+        print("公開測試被改掉將不會有人發現。修好之前不要進行驗收。")
+        return False
+
+    print("事後稽核自我檢查：verify-locks.py 實跑正常（相符回 0、竄改回 1）。")
+    print("（run-hidden-tests.py 與 hidden_vault.py 不在這裡驗：驗收跑的是封存庫裡"
+          "那一份，它會自己比對簽過章的 sha256——見第三輪 P0-8 (a)。"
+          "這支腳本自己仍然驗不了，誰來驗驗證者是個真的循環。）")
+    return True
+
+
 def check_version() -> None:
     """報告產出專案目前的版本號。
 
@@ -477,12 +543,13 @@ def main() -> int:
     check_gitignore()
     check_unprotected_hidden_dirs()
     check_locks()
+    audit_ok = check_audit_scripts()
     check_vault_state()
     check_version()
     check_design()
     print("===== 結束 =====")
 
-    if args.strict and (failures or not config_ok):
+    if args.strict and (failures or not config_ok or not audit_ok):
         # 子智能體是新 session，不會再跑一次 SessionStart hook；
         # verifier-reviewer 靠這個非零 exit 知道「防護在派工中途失效了」。
         return 1

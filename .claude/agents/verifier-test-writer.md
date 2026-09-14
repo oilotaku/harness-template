@@ -76,7 +76,9 @@ frontmatter 的 `thinking` 欄位**不會被 Claude Code 讀取**，它只是本
 2. **已封存**的隱藏測試（執行過 `seal-hidden-tests.py`，工作目錄裡不留明文）。
    這個指令會**先鎖定公開測試、再封存、再用權杖簽章 manifest**，一次做完。
 3. **基線執行結果**：封存後**立刻**跑
-   `python3 scripts/run-hidden-tests.py --task-id <task_id> --token <權杖> --baseline`，
+   `python3 "<封存庫>/_runner/run-hidden-tests.py" --task-id <task_id> --token <權杖> --baseline`，
+   （封存結束時會印出這個絕對路徑；用它而不是 `scripts/run-hidden-tests.py`——
+   repo 裡那一份 implementer 改得到，見第三輪 P0-8 (a)）
    證明這份隱藏測試在沒有實作時是**紅的**。這一跑不計入 implementer 的停損次數，
    結果會簽進 manifest。全綠代表沒有鑑別力（一份全部 `assert True` 的測試也會
    「全部通過」）——修正測試後重新封存。這也是你唯一能確認「隱藏測試至少跑得起來」

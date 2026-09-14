@@ -19,7 +19,7 @@ tools: Read, Glob, Grep, Bash
 > 不如讓所有人都只能透過**執行**來驗收。
 >
 > 因此你必須這樣做：
-> - 用 `python3 scripts/run-hidden-tests.py --task-id <task_id> --token <權杖>`
+> - 用 `python3 "<封存庫>/_runner/run-hidden-tests.py" --task-id <task_id> --token <權杖>`
 >   取得通過/失敗結果與失敗訊息。**權杖由 Orchestrator 在派工時給你**；
 >   沒有權杖就跑不動，這是設計，不是故障。
 > - 「驗收標準對照表」是 `verifier-test-writer` 產出的**獨立文件**（不在封存庫裡，
@@ -57,7 +57,10 @@ frontmatter 的 `thinking` 欄位**不會被 Claude Code 讀取**，它只是本
 
 1. **執行公開測試 + 隱藏測試**，全部通過才算過第一關。
    - 公開測試：用專案對應的測試指令直接跑 `tests/public/`。
-   - 隱藏測試：`python3 scripts/run-hidden-tests.py --task-id <task_id> --token <權杖>`
+   - 隱藏測試：`python3 "<封存庫>/_runner/run-hidden-tests.py" --task-id <task_id> --token <權杖>`
+     **用 Orchestrator 給你的那個絕對路徑，不要用 `scripts/run-hidden-tests.py`。**
+     repo 裡那一份 implementer 改得到；封存版在 repo 之外，而且它每個檔案的 sha256
+     都在簽過章的 manifest 裡，被動過就跑不動（第三輪 P0-8 (a)）。
      （exit 0 全過 / 1 有失敗 / 2 無法執行）。
    - 若回傳 2 且訊息是「簽章不符」「鎖定清單被刪除/改寫」「封存檔案被竄改」或
      「封存檔案遺失」，**這本身就是可疑訊號**，判定不通過並在報告裡明確記載，
@@ -66,6 +69,11 @@ frontmatter 的 `thinking` 欄位**不會被 Claude Code 讀取**，它只是本
    - runner 若印出「這份隱藏測試從未被證明過會紅」，代表 verifier-test-writer 沒做
      基線執行（`--baseline`）。一份全部 `assert True` 的隱藏測試也會「全部通過」，
      所以**這句話要寫進驗收報告**，並回報 Orchestrator 補做基線。
+   - 若回傳 2 且訊息是「**封存過**（流水帳有紀錄…）但 manifest 裡那一筆不見了」，
+     判定不通過並明確記載。這跟上面那幾種同一級：封存紀錄在封存之後被刪除了。
+   - 若回傳 2 且訊息只是「manifest 裡沒有 task」，**不要自己判斷成 Orchestrator
+     派工時 task_id 打錯**。第三輪 P0-9 實測：作廢一個 task 再把墓碑刪掉，
+     得到的訊息跟打錯字一模一樣。回報 Orchestrator 對照它的派工紀錄，由它判斷。
    - 若你手上沒有權杖，回報 Orchestrator 要，不要嘗試繞過——
      繞得過去就代表這套機制壞了。
    - 若回傳 2 且訊息是「**封存已經被作廢**」，代表這個 task 的權杖遺失過，
@@ -90,6 +98,22 @@ frontmatter 的 `thinking` 欄位**不會被 Claude Code 讀取**，它只是本
      有些版本會回傳 0。runner 會偵測常見的零測試輸出並判定不通過，
      但那是啟發式的，你仍要自己看一眼「跑了幾個測試」。
      解密的檔案數會印在輸出裡，可以拿來對照。
+
+   > **這一步驗得到與驗不到的事**（第三輪 P0-8，誠實記載）：
+   >
+   > 用**封存版**執行時，它會先比對 `_runner/` 底下每個檔案的 sha256 與簽過章的
+   > 紀錄，並印出「驗收程式碼：封存版，N 個檔案的 sha256 與簽章紀錄相符」。
+   > 沒有這一行就代表你跑的不是封存版——回去用 Orchestrator 給你的絕對路徑。
+   >
+   > 仍然驗不到的是：如果被換掉的是封存版的 `run-hidden-tests.py` **自己**、
+   > 而且換掉的版本把這段檢查整個拿掉，那就沒有人會執行這段檢查——任何自我檢查
+   > 都有這個循環。封存版買到的是「攻擊者得寫到 repo 之外（guard 對封存庫不分動詞
+   > 一律擋），而且動其他四個檔案都會被抓到」。
+   >
+   > 所以最後一道仍然是你：若驗收結果與你讀程式碼得到的印象明顯不符——實作看起來
+   > 根本沒做完、卻「全部通過」——**以你讀到的程式碼為準**，回報 Orchestrator
+   > 要求人工複核。
+
 2. **靜態審查程式碼**，檢查以下常見作弊/取巧模式（參考
    [SE-CoVe 獨立驗證鏈, Meta AI ACL 2024] 的精神：驗證要獨立於產生答案的過程）：
    - 針對測試輸入寫死回傳值（if input == 已知測試值 then return 已知輸出）

@@ -35,7 +35,9 @@ import argparse
 import json
 import os
 import platform
+import shutil
 import socket
+import subprocess
 import sys
 from pathlib import Path
 
@@ -85,6 +87,34 @@ def print_fingerprint(fingerprint: dict, indent: str = "  ") -> None:
         print(f"{indent}{line}")
 
 
+def baseline_is_tracked():
+    """基準指紋檔會不會跟著 repo 一起走。
+
+    第三輪 P1-11：`.harness/` 在 `.gitignore` 裡（這是對的，它是每台機器的當下
+    狀態），但在「每個 session 都重新 clone」的執行環境裡——容器、CI、遠端 agent
+    沙箱——這代表基準**永遠不會跨 session 存在**，於是每次都走 `created` 分支：
+    寫一份新基準、印「狀態：正常」、什麼都沒比對。守門機制在那裡等同停用，
+    而且沒有任何訊號。
+
+    回傳 True／False／None（沒有 git 或不是 repo，判斷不出來）。
+    刻意不去猜「這是不是拋棄式環境」——那是列舉式判斷，下一種環境就會漏
+    （本模板第一輪 P3-1 列舉容器特徵，第三輪就在一個全都沒命中的環境裡失效）。
+    這裡只回答一個查得出來的事實，把「所以要不要擔心」留給訊息本身講清楚。
+    """
+    if shutil.which("git") is None or not (REPO_ROOT / ".git").exists():
+        return None
+    try:
+        relative = FINGERPRINT_FILE.relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return None
+    result = subprocess.run(
+        ["git", "check-ignore", "-q", relative],
+        cwd=str(REPO_ROOT), capture_output=True,
+        text=True, encoding="utf-8", errors="replace",
+    )
+    return result.returncode != 0
+
+
 def evaluate(update: bool) -> dict:
     """比對（或更新）指紋，回傳純資料結果。
 
@@ -101,6 +131,7 @@ def evaluate(update: bool) -> dict:
         "mismatches": [],
         "filled_missing": [],
         "skipped": [],
+        "baseline_tracked": None,
     }
 
     if update and FINGERPRINT_FILE.exists():
@@ -112,6 +143,7 @@ def evaluate(update: bool) -> dict:
     if not FINGERPRINT_FILE.exists():
         save(current)
         result["status"] = "created"
+        result["baseline_tracked"] = baseline_is_tracked()
         return result
 
     recorded = json.loads(FINGERPRINT_FILE.read_text(encoding="utf-8"))
@@ -183,7 +215,20 @@ def print_human(result: dict) -> int:
             print("（偵測到主機名稱不穩定的執行環境（容器／K8s／Codespaces／CI）：")
             print("  主機名稱每次重建都會變，因此之後不列入比對，")
             print("  改以作業系統／架構／CPU 與記憶體級距判斷是不是同一種執行環境）")
-        print("狀態：正常（首次執行）")
+        # 第三輪 P1-11：這裡以前印「狀態：正常（首次執行）」。那句話是錯的——
+        # 首次執行**什麼都沒比對**，守門這一次完全沒有生效。而在每個 session
+        # 都重新 clone 的環境裡（容器、CI、遠端 agent 沙箱），因為 .harness/
+        # 被 gitignore，每一次都會是首次執行：機制永遠不會生效，而且永遠在說「正常」。
+        print("狀態：**本次沒有比對任何東西**——基準是這一次才建立的。")
+        print("      環境指紋守門要到下一次執行才會真的生效。")
+        if result.get("baseline_tracked") is False:
+            print()
+            print("⚠️ 基準指紋檔在 .gitignore 裡（這是對的，它是每台機器的當下狀態），")
+            print("   但這也代表它**不會跟著 repo 走**。如果這個執行環境每個 session")
+            print("   都重新 clone（容器、CI、遠端 agent 沙箱），那麼每次都會是「首次執行」，")
+            print("   環境指紋守門在這裡**等同停用**——黃金法則第 6 條不會有機會觸發。")
+            print("   要在這類環境真的守得住，基準必須放在會跨 session 保留的地方")
+            print("   （Orchestrator 的跨 session 記憶，見 docs/memory-management.md）。")
         print("===== 結束 =====")
         return 0
 

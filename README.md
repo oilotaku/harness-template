@@ -29,7 +29,7 @@
 | 規則 | 不靠什麼 | 靠什麼 |
 |---|---|---|
 | 實作者看不到隱藏測試 | 提示詞叮嚀 | 加密封存到 repo 之外（每檔獨立金鑰），解密需要一次性權杖 |
-| 驗收結果不可被偽造 | 「`.harness/` 有 hook 擋著」 | runner 信任的每個 manifest 欄位都用權杖簽過章，改了就驗不過 |
+| 驗收結果不可被偽造 | 「`.harness/` 有 hook 擋著」 | runner 信任的每個 manifest 欄位都用權杖簽過章；**驗收用的程式碼本身也一起封存到 repo 之外**，每個檔案的 sha256 同樣進簽章範圍——改了 repo 裡的副本不影響驗收，改了封存版就跑不動 |
 | 公開測試不可被竄改 | 事前攔截有沒有成功 | 事後 sha256 稽核；清單本身的 sha256 也在簽過章的 manifest 裡，整份刪掉也查得出來 |
 | 隱藏測試真的有鑑別力 | 「檢驗者會寫好」 | 封存後強制做基線執行：沒有實作時必須是紅的，結果簽進 manifest |
 | 連續失敗 ≥3 次要停損 | implementer 自我申報 | 由執行測試的一方寫入、逐筆簽章的客觀次數；筆數也簽進 manifest，砍掉紀錄查得出來 |
@@ -40,13 +40,33 @@
 | 設計不會被默默套用 | 模板附什麼就用什麼 | 預設標記成「未經這個專案確認」，每個 session 提醒到有人真的問過使用者為止 |
 | 檢驗者不動手改實作 | 提示詞叮嚀 | 它沒有 `Write` 工具；skill 政策也擋掉會產生程式碼的 skill |
 | 文件、設定、CI 保持一致 | 記得同步 | 漂移測試——少同步一處就直接紅 |
-| 環境變了要停下來確認 | 使用者自己注意 | 環境指紋比對，且刻意**不把容器的隨機主機名當成環境變更**（總是誤報的守門等於沒有守門） |
+| 環境變了要停下來確認 | 使用者自己注意 | 環境指紋比對，且刻意**不把容器的隨機主機名當成環境變更**（總是誤報的守門等於沒有守門）。首次執行會明講「本次沒有比對任何東西」，基準被 gitignore 時另外警告它在重新 clone 的環境裡等同停用 |
 
 **它擋什麼、不擋什麼**（誠實版本）：這套機制擋的是「順手看一眼」「習慣性搜整個 repo」
-「用工具的正常用法碰到」這類**非刻意**的洩題，並讓**刻意**的繞過留下痕跡（簽章不符、
-稽核不符、嘗試次數對不上）。它**不擋**一個「決心繞過、而且跟 verifier 共用同一個
-OS 使用者」的子智能體——權杖會經過 Claude Code 的 transcript，解密後的明文在測試執行
-期間短暫存在於磁碟上。那需要獨立的使用者或容器，超出本模板範圍。
+「用工具的正常用法碰到」這類**非刻意**的洩題。它**不擋**一個「決心繞過、而且跟 verifier
+共用同一個 OS 使用者」的子智能體——權杖會經過 Claude Code 的 transcript，解密後的明文
+在測試執行期間短暫存在於磁碟上。那需要獨立的使用者或容器，超出本模板範圍。
+
+⚠️ **這裡曾經還寫著「刻意的繞過會留下痕跡（簽章不符、稽核不符、嘗試次數對不上）」，
+那句話被第三輪的實測證否，所以拿掉了。** 當時改寫 `scripts/run-hidden-tests.py`
+這條路一個痕跡都沒留：驗收 exit 0、印「隱藏測試全部通過」、權杖被送進被改過的程式碼的
+argv，而 `verify-locks.py` 與 `guard-selfcheck.py --strict` 都回報正常。
+
+那條路現在關上了，但**關上它的是派工方式，不是某一支程式**：驗收用的程式碼會連同
+隱藏測試一起封存到 repo 之外（`<封存庫>/_runner/`），每個檔案的 sha256 進簽章範圍，
+而 Orchestrator 派工時給 `verifier-reviewer` 的是**那個絕對路徑**。所以：
+
+- 改 repo 裡的 `scripts/run-hidden-tests.py` → 不影響驗收（驗收跑的不是它）
+- 改封存版的任何相依模組 → sha256 對不上，直接 exit 2
+- 事前層另外擋著：guard 在「這個 repo 封存過 task 之後」擋下對強制力本體
+  （`scripts/`、`.claude/`、`CLAUDE.md`、`harness.config.json`）的寫入；
+  套用到你自己的專案時還建議加一組 `deny`（見 `docs/getting-started.md`）
+
+**仍然不擋的**（誠實記載）：如果被換掉的是封存版的 `run-hidden-tests.py` 自己、
+而且換掉的版本把自我比對整段拿掉，就沒有人會執行那段檢查——任何自我檢查都有這個
+循環。封存版買到的是「攻擊者得寫到 repo 之外（guard 對封存庫不分動詞一律擋），
+而且動其他四個檔案都會被抓到」。要完全消除需要獨立的使用者或容器，超出本模板範圍。
+細節見 `docs/history/improvement-suggestions-round3.md` 的 P0-8。
 
 明文解在**封存庫底下**而不是 `/tmp`，所以萬一行程被強制中斷（撞到用量上限、
 容器被回收）沒清乾淨，殘留至少落在 guard 擋得住的路徑裡；下一次執行、`--sweep`、
@@ -146,16 +166,16 @@ OS 使用者」的子智能體——權杖會經過 Claude Code 的 transcript�
 
 | 腳本 | 角色 | 什麼時候跑 |
 |---|---|---|
-| `scripts/seal-hidden-tests.py` | **實體隔離**：鎖定公開測試 → 把暫存區的隱藏測試逐檔加密（每檔獨立金鑰）搬到 repo 之外 → 用權杖簽章 manifest，並產生一次性執行權杖。已進 git 歷史的檔案拒絕封存 | verifier-test-writer 寫完測試後 |
-| `scripts/run-hidden-tests.py` | 隱藏測試的**唯一執行入口**：驗 manifest 簽章 → 比對鎖定清單 sha256 → 解密執行。`--baseline` 證明測試在沒有實作時是紅的；正式模式記錄簽過章的嘗試次數 | test-writer 封存後（`--baseline`）、verifier-reviewer 驗收時 |
-| `scripts/discard-sealed-task.py` | **權杖遺失後的唯一出路**：刪掉再也解不開的密文、在 manifest 留下墓碑、指出重寫流程。不是救援路徑——作廢次數會帶進重新封存後簽過章的項目，歷史洗不白 | 權杖連同 session 一起消失時（最常見：執行測試時撞到用量上限） |
+| `scripts/seal-hidden-tests.py` | **實體隔離**：鎖定公開測試 → 把暫存區的隱藏測試逐檔加密（每檔獨立金鑰）搬到 repo 之外 → **把驗收用的程式碼一起複製進封存庫並記下 sha256** → 用權杖簽章 manifest，並產生一次性執行權杖。已進 git 歷史的檔案拒絕封存 | verifier-test-writer 寫完測試後 |
+| `scripts/run-hidden-tests.py` | 隱藏測試的**唯一執行入口**：驗 manifest 簽章 → 比對封存版程式碼的 sha256 → 比對鎖定清單 sha256 → 解密執行。**驗收要跑封存庫裡那一份**（`<封存庫>/_runner/`，由 seal 複製、絕對路徑由 Orchestrator 轉交），repo 裡這份 implementer 改得到。`--baseline` 證明測試在沒有實作時是紅的；正式模式記錄簽過章的嘗試次數 | test-writer 封存後（`--baseline`）、verifier-reviewer 驗收時 |
+| `scripts/discard-sealed-task.py` | **權杖遺失後的唯一出路**：把再也解不開的密文移進封存庫的 `_discarded/`（不是刪掉——它讓「這個 task 存在過」留下要另外動手才抹得掉的證據）、清掉殘留明文、在 manifest 留下墓碑、往 repo 之外的封存流水帳追加一行、指出重寫流程。不是救援路徑——作廢次數會帶進重新封存後簽過章的項目，歷史洗不白 | 權杖連同 session 一起消失時（最常見：執行測試時撞到用量上限） |
 | `scripts/hidden_vault.py` | 上面幾支共用的封存庫邏輯（加密、manifest、路徑規則） | 被 import，不直接執行 |
 | `scripts/harness_config.py` | 讀 `harness.config.json`：這個專案的測試路徑慣例與**版本號來源**（非 Python 專案一定要設） | 被 import，不直接執行 |
 | `scripts/version.py` | **產出專案的版本號**：讀寫 semver，支援純文字 / `package.json` / `pyproject.toml` 三種來源，寫回去不破壞檔案其他內容。`mirrors` 讓 README / 程式 / manifest 上的版本一起更新、一起驗一致。升版時把原始碼另存成 `releases/<版本>/`。只有 Orchestrator 能用，implementer 對版本檔與歸檔的寫入會被 guard 擋下（讀不擋） | 拆解任務前確認版本、一批需求驗收完成後升版 |
 | `scripts/release_archive.py` | 版本歸檔本體：每個版本各開一個資料夾存放完整原始碼。**隱藏測試暫存區一律排除**（進去等於從歸檔洩題），歸檔目錄自己也排除以免遞迴 | 被 `version.py` 呼叫，不直接執行 |
-| `scripts/guard-hidden-tests.py` | **事前攔截**：PreToolUse hook，擋下對暫存區、封存庫、`.harness/`（`progress/` 除外）的存取；對已鎖定公開測試、版本檔、`releases/` 則**只擋寫入不擋讀取**（讀它們是正當用途） | 每次工具呼叫（由 `.claude/settings.json` 掛上） |
+| `scripts/guard-hidden-tests.py` | **事前攔截**：PreToolUse hook，擋下對暫存區、封存庫、`.harness/`（`progress/` 除外）的存取；對已鎖定公開測試、版本檔、`releases/`，以及**封存過 task 之後**的強制力本體（`scripts/`、`.claude/`、`CLAUDE.md`、`harness.config.json`）則**只擋寫入不擋讀取**（讀它們是正當用途） | 每次工具呼叫（由 `.claude/settings.json` 掛上） |
 | `scripts/lock-tests.py` | 把公開測試的**路徑 + sha256** 寫進 `.harness/locked-tests.list`；清單的 sha256 會被 seal 簽進 manifest | 由 `seal-hidden-tests.py` 自動呼叫；封存後修了公開測試要重新封存，不是只重跑這支 |
-| `scripts/verify-locks.py` | **事後稽核**：重算雜湊比對，抓出「事前攔截被繞過」的竄改 | verifier-reviewer 驗收的第一步 |
+| `scripts/verify-locks.py` | **事後稽核**：重算雜湊比對，抓出「事前攔截被繞過」的竄改。`guard-selfcheck.py` 每個 session 會用已知情境**實跑**它一次，確認它自己沒被換掉 | verifier-reviewer 驗收的第一步 |
 | `scripts/guard-selfcheck.py` | **自我檢查**：用已知該被擋的 payload 實跑一次；掃出「看起來是隱藏測試、卻不在受保護路徑內」的目錄；清掉上次被強制中斷留下的解密殘留；報告目前版本號與各處是否一致，以及有沒有因權杖遺失而作廢的 task | SessionStart hook |
 
 四層各擋不同的東西，缺一不可：
@@ -262,5 +282,6 @@ session 各自重載 `CLAUDE.md` 與自己的定義檔。那是「獨立驗證�
 引入的新信任根——manifest、鎖定清單、keystream——做了實測，並列出尚未處理的項目。
 第三輪審視 `docs/history/improvement-suggestions-round3.md`（同樣只給人看）問了下一個問題：
 簽章保護的是 runner 信任的**資料**，那 **runner 自己**是誰寫的？結論是強制力的程式碼
-本身 implementer 改得到，**尚未修正**——在那之前，下面「它擋什麼、不擋什麼」那一段
-要連同第三輪 P0-8 一起讀。
+本身 implementer 改得到。這一輪的八項（P0-8 的 (a) 與 (c)、P0-9、P1-9、P1-10、
+P1-11、P2-10、P2-11）都已落地——根本解是把驗收用的程式碼一起封存、由封存版執行。
+殘留限制寫在上面「它擋什麼、不擋什麼」那一段，沒有粉飾。

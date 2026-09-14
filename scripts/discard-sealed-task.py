@@ -7,9 +7,15 @@
 session 消失了（最常見的原因：**執行測試時撞到用量上限，session 被回收**），
 密文就永遠解不開了——而封存時工作目錄裡的明文已經刪掉，連「重新封存」都做不到。
 
-這支腳本**不是救援路徑**，它做的是相反的事：把那份再也用不到的密文清乾淨，
-在 manifest 留下一塊墓碑，然後明確告訴使用者「這個 task 要重寫一份隱藏測試」。
+這支腳本**不是救援路徑**，它做的是相反的事：把那份再也用不到的密文移進封存庫的
+`_discarded/`、清掉可能殘留的明文，在 manifest 留下一塊墓碑、往 repo 之外的封存
+流水帳追加一行，然後明確告訴使用者「這個 task 要重寫一份隱藏測試」。
 留後門等於留繞過方式，所以恢復的方式只有重寫，沒有第二條。
+
+第三輪 P0-9 之前，密文是直接刪掉的。改成搬家而不是刪除，是因為墓碑可以被整份
+刪掉——刪完之後「被作廢」與「從來沒封存過」的訊息一模一樣，而後者看起來只是
+Orchestrator 派工打錯字。密文沒有權杖本來就解不開，留著不增加洩題風險，
+卻讓「這個 task 存在過」多一份要另外動手才抹得掉的證據。
 
 在它出現之前，撞到這個狀態的人看到的是「權杖錯誤：指紋與封存當下記錄的不符」——
 一個會讓人以為只是打錯字、於是去翻找一個根本不存在的權杖的訊息。
@@ -58,7 +64,7 @@ def summarise_previous(info: dict) -> dict:
     """墓碑裡保留的封存紀錄。
 
     刻意只留「說得出這個 task 曾經有過什麼」所需的欄位，不留任何能幫助解密的東西
-    （密文本身會被刪掉，token_sha256 只是指紋，推不回權杖）。
+    （密文會被移進作廢區、沒有權杖解不開，token_sha256 只是指紋，推不回權杖）。
     """
     return {
         "sealed_at": info.get("sealed_at"),
@@ -70,22 +76,46 @@ def summarise_previous(info: dict) -> dict:
     }
 
 
-def remove_ciphertext(info: dict) -> list:
-    """刪掉密文與可能殘留的解密目錄，回傳實際刪掉的路徑。
+def retire_ciphertext(info: dict, vault_dir: Path, task_id: str):
+    """把密文搬到 `<vault>/_discarded/<task_id>-<時間>/`，並清掉殘留的明文。
 
-    連解密目錄一起刪是必要的：權杖遺失前的最後一次執行，正是最可能被中斷、
-    最可能把明文留在封存庫裡的那一次。
+    第三輪 P0-9 之前這裡是直接 `rmtree`，於是作廢＋刪墓碑之後，這個 task
+    曾經存在過的證據就一點都不剩了。改成搬家的理由：
+
+      - 密文沒有權杖本來就解不開，留著**不增加任何洩題風險**
+      - 但它讓「這個 task 存在過」多一份要另外動手才抹得掉的證據
+      - 真的要刪是另一個動作，而那個動作是吵的（目錄名字寫著 _discarded）
+
+    殘留的**明文**仍然必須刪掉，不能跟著搬：權杖遺失前的最後一次執行，
+    正是最可能被中斷、最可能把明文留在封存庫裡的那一次。
     """
-    removed = []
     raw = info.get("task_dir")
     if not raw:
-        return removed
+        return None, []
     task_dir = Path(raw)
-    if task_dir.is_dir():
+    if not task_dir.is_dir():
+        return None, []
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    target = vault_dir / vault.DISCARDED_DIR_NAME / f"{task_id}-{stamp}"
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(task_dir), str(target))
+    except OSError:
+        # 搬不動（權限、跨檔案系統）時退回原本的行為：刪掉。
+        # 留著一份可能含明文的目錄，比失去證據更危險。
         shutil.rmtree(task_dir, ignore_errors=True)
-        if not task_dir.exists():
-            removed.append(task_dir)
-    return removed
+        return None, [task_dir] if not task_dir.exists() else []
+
+    purged = []
+    for path in sorted(target.rglob("*")):
+        if path.is_file() and path.suffix != ".enc":
+            try:
+                path.unlink()
+                purged.append(path)
+            except OSError:
+                pass
+    return target, purged
 
 
 def main() -> int:
@@ -135,14 +165,16 @@ def main() -> int:
         print("（你給的權杖指紋不符，確實不是這個 task 的權杖）")
 
     if not args.token_lost or not args.confirm:
-        print("這是破壞性操作：密文會被刪除，之後**只能重寫一份隱藏測試**。", file=sys.stderr)
+        print("這是破壞性操作：密文會被移進作廢區、再也解不開，之後**只能重寫一份隱藏測試**。",
+              file=sys.stderr)
         print("確定權杖已經遺失的話，兩個旗標都要給：", file=sys.stderr)
         print(f"  python3 scripts/discard-sealed-task.py --task-id {args.task_id} "
               "--token-lost --confirm", file=sys.stderr)
         return 2
 
     previous = summarise_previous(info)
-    removed = remove_ciphertext(info)
+    vault_dir = Path(info.get("vault_dir") or vault.resolve_vault_dir(root))
+    retired, purged = retire_ciphertext(info, vault_dir, args.task_id)
 
     tombstone = {
         "status": vault.DISCARDED_STATUS,
@@ -157,11 +189,15 @@ def main() -> int:
     }
     manifest["tasks"][args.task_id] = tombstone
     vault.save_manifest(manifest, root)
+    vault.append_sealed_log(vault_dir, args.task_id, "discarded")
 
     print(f"task_id：{args.task_id}")
-    if removed:
-        for path in removed:
-            print(f"已刪除封存內容：{path}")
+    if retired:
+        print(f"密文已移到作廢區：{retired}")
+        print("（密文沒有權杖本來就解不開，留著不增加洩題風險；"
+              "但它讓「這個 task 存在過」多一份要另外動手才抹得掉的證據）")
+        if purged:
+            print(f"順帶清掉 {len(purged)} 個殘留的明文檔案（上一次執行若被中斷會留下）。")
     else:
         print("（封存目錄本來就不在了，只寫入墓碑）")
     print(f"manifest 已記下墓碑（累計作廢 {tombstone['discard_count']} 次，"

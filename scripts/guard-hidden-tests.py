@@ -179,6 +179,17 @@ VERSION_FILE = "VERSION"
 # 已發布版本的快照是唯讀的歷史：就地改掉它比沒有快照更糟——它看起來是那一版，
 # 其實不是。所以比照版本檔**只擋寫入、不擋讀取**（比對舊版行為是正當用途）。
 ARCHIVE_DIR = "releases"
+
+# 第三輪 P0-8／P1-10：強制力本體。runner、簽章模組、稽核腳本、guard 自己、
+# hook 掛在哪裡、受保護路徑的定義、以及檢驗者的行為準則——這些**不是**產出專案的
+# 原始碼，implementer 沒有正當理由改它們。第三輪實測：改掉 run-hidden-tests.py
+# 就能讓驗收 exit 0 並印「隱藏測試全部通過」，同時權杖被送進被改過的程式碼的 argv。
+#
+# 比照版本檔：**只擋寫入、不擋讀取**——讀 harness 的程式碼是正當用途
+# （implementer 可能需要知道測試怎麼被執行），改它不是。
+HARNESS_SOURCE_PREFIXES = ("scripts", ".claude")
+HARNESS_SOURCE_FILES = ("CLAUDE.md", "harness.config.json")
+
 if harness_config is not None:
     try:
         _config = harness_config.load(REPO_ROOT)
@@ -191,6 +202,18 @@ if harness_config is not None:
             ARCHIVE_DIR = _archive["dir"]
     except BaseException as _exc:  # noqa: BLE001 — 設定壞掉一律 fail-closed
         _STARTUP_ERROR = _exc
+
+
+def _manifest_tasks() -> dict:
+    """隱藏測試 manifest 裡的 task 項目（含作廢留下的墓碑）。讀不到就當成空的。"""
+    if not HIDDEN_MANIFEST.exists():
+        return {}
+    try:
+        manifest = json.loads(HIDDEN_MANIFEST.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    tasks = manifest.get("tasks")
+    return tasks if isinstance(tasks, dict) else {}
 
 
 def _vault_dirs() -> list:
@@ -219,17 +242,25 @@ def _vault_dirs() -> list:
     add(REPO_ROOT.parent / ".harness-hidden" / REPO_ROOT.name)
     add(os.environ.get("HARNESS_HIDDEN_DIR"))
 
-    if HIDDEN_MANIFEST.exists():
-        try:
-            manifest = json.loads(HIDDEN_MANIFEST.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            manifest = {}
-        for info in (manifest.get("tasks") or {}).values():
-            if isinstance(info, dict):
-                add(info.get("vault_dir"))
-                add(info.get("task_dir"))
+    for info in _manifest_tasks().values():
+        if isinstance(info, dict):
+            add(info.get("vault_dir"))
+            add(info.get("task_dir"))
 
     return dirs
+
+
+def _harness_source_protected() -> bool:
+    """強制力面要不要保護，取決於「這個 repo 封存過 task 沒有」。
+
+    這個條件是刻意的，不是偷懶：**開發 harness 模板本身時，`scripts/` 就是產品**，
+    一律保護會讓維護模板的人被自己的 hook 擋住（而繞過它的習慣一旦養成，
+    整層防護就等於沒有）。而 implementer 會動手的時機，恰好都在某個 task 被封存
+    之後——所以用「有沒有封存過」當開關，涵蓋的正是需要涵蓋的那段時間。
+
+    作廢留下的墓碑也算數：否則「先作廢再改 runner」就成了一條關掉保護的路。
+    """
+    return bool(_manifest_tasks())
 
 
 # 這些工具只要目標落在 tests/hidden/ 之下就一律擋（讀寫都擋，見模組說明）。
@@ -290,6 +321,7 @@ REDIRECT_PATTERN = re.compile(r"(?:^|\s)\d*>{1,2}\s*(\S+)")
 SHA256_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
 
 VAULT_DIRS = _vault_dirs()
+HARNESS_SOURCE_PROTECTED = _harness_source_protected()
 
 VAULT_REASON = (
     "拒絕：這個路徑屬於隱藏測試封存庫（repo 之外，內容已加密）。"
@@ -412,6 +444,20 @@ def _is_archive_path(rel) -> bool:
     return target == ARCHIVE_DIR or target.startswith(ARCHIVE_DIR + "/")
 
 
+def _is_harness_source_path(rel) -> bool:
+    """強制力本體：runner／簽章／稽核／guard／hook 設定／受保護路徑的定義／
+    檢驗者的行為準則。只在封存過 task 之後生效（見 _harness_source_protected）。"""
+    if not rel or not HARNESS_SOURCE_PROTECTED:
+        return False
+    target = rel.rstrip("/")
+    if target in HARNESS_SOURCE_FILES:
+        return True
+    return any(
+        target == prefix or target.startswith(prefix + "/")
+        for prefix in HARNESS_SOURCE_PREFIXES
+    )
+
+
 def _is_protected_write_target(rel, locked: set) -> bool:
     if not rel:
         return False
@@ -420,6 +466,7 @@ def _is_protected_write_target(rel, locked: set) -> bool:
         or _is_harness_path(rel)
         or _is_version_file(rel)
         or _is_archive_path(rel)
+        or _is_harness_source_path(rel)
     ):
         return True
     return rel.rstrip("/") in locked
@@ -466,6 +513,16 @@ def _check_file_path(raw_path: str, locked: set, tool_name: str = None):
             f"拒絕：「{target}」是這個專案的版本檔，屬於治理資訊，實作者不可修改。"
             "版本號由 Orchestrator 用 `python3 scripts/version.py --bump <層級>` 更新"
             "（讀它沒有問題，只有寫入被擋）。"
+        )
+
+    if _is_harness_source_path(target):
+        return (
+            f"拒絕：「{target}」屬於 harness 的強制力本體（驗收 runner、簽章與加密、"
+            "事後稽核、guard 自己、hook 設定、受保護路徑的定義、檢驗者的行為準則）。"
+            "改掉它就能讓驗收假通過——第三輪 P0-8 實測：覆寫 run-hidden-tests.py 之後，"
+            "用完全正確的權杖執行驗收會得到 exit 0 與「隱藏測試全部通過」，"
+            "而三項事後稽核全部回報正常。讀它沒有問題，只有寫入被擋；"
+            "真的需要改 harness 本身，請交給 Orchestrator 或人類維護者。"
         )
 
     if target.rstrip("/") in locked:
@@ -655,7 +712,8 @@ def _check_bash_command(command: str, locked: set):
             if _is_protected_write_target(_to_repo_relative(target, cwd), locked):
                 return (
                     "拒絕：偵測到 Bash 指令對受保護路徑（隱藏測試暫存區、.harness/、"
-                    f"已鎖定的公開測試或版本檔）執行了寫入類操作（`{verb}` 目標：「{target}」），"
+                    "已鎖定的公開測試、版本檔或 harness 強制力本體）"
+                    f"執行了寫入類操作（`{verb}` 目標：「{target}」），"
                     "一律擋下。若為誤判，請改用不涉及這些路徑的方式完成，"
                     "或請 Orchestrator / verifier 協助處理。"
                 )

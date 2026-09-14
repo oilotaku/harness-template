@@ -993,20 +993,38 @@ def _(tmp: Path):
     assert "不受保護" in readme.read_text(encoding="utf-8"), readme
 
 
-@case("settings.json 的 allow 清單涵蓋每一組回歸測試（不然預設沒人會跑它）")
+def _entry_scripts() -> list:
+    """會被人或子智能體直接執行的腳本（有 `if __name__ == "__main__"` 的那些）。
+
+    第三輪 P2-11：這裡原本寫死 `glob("test-*.py")`，於是之後新增的**非測試**
+    入口腳本就從缺口掉出去——實測 `check-design-tokens.py` 與
+    `discard-sealed-task.py` 都被文件明確指示要執行，卻都不在 allow 清單裡，
+    每次呼叫都會跳權限提示。判定基準寫成列舉，下一個新檔案就會再掉一次，
+    所以改成問「它是不是入口腳本」這個查得出來的事實。
+
+    guard hook 例外：它是由 settings.json 的 hooks 直接執行的，不經過
+    Bash 權限檢查，寫進 allow 清單反而會讓人以為它是給人跑的。
+    """
+    skip = {"guard-hidden-tests.py"}
+    entries = []
+    for path in sorted(SCRIPTS_DIR.glob("*.py")):
+        if path.name in skip:
+            continue
+        if 'if __name__ == "__main__"' in path.read_text(encoding="utf-8"):
+            entries.append(path.name)
+    return entries
+
+
+@case("settings.json 的 allow 清單涵蓋每一支入口腳本（不然每次呼叫都跳權限提示）")
 def _(tmp: Path):
     # P2-5 的一個具體案例：test-guards.py 曾經是這個 repo 唯一的自動化測試，
     # 卻沒被寫進 allow 清單也沒寫進 README——等於預設沒人會跑它。
-    # 新增一組測試卻忘了同步的話，這裡會紅。
+    # 新增入口腳本卻忘了同步的話，這裡會紅。
     settings = json.loads(
         (SCRIPTS_DIR.parent / ".claude" / "settings.json").read_text(encoding="utf-8")
     )
     allow = "\n".join(settings["permissions"]["allow"])
-    missing = [
-        path.name
-        for path in sorted(SCRIPTS_DIR.glob("test-*.py"))
-        if path.name not in allow
-    ]
+    missing = [name for name in _entry_scripts() if name not in allow]
     assert not missing, f"settings.json 的 allow 清單少了：{missing}"
 
 
@@ -1183,6 +1201,132 @@ def _(tmp: Path):
     assert not problems, "以下位置依賴系統預設編碼，在非 UTF-8 環境會炸：\n  " + "\n  ".join(
         problems
     )
+
+
+# ------------------------------------- 第三輪 P0-8／P1-10：強制力本體的寫入保護
+#
+# 第三輪實測：覆寫 scripts/run-hidden-tests.py 之後，用完全正確的權杖執行驗收會得到
+# exit 0 與「隱藏測試全部通過」，權杖同時被送進被改過的程式碼的 argv，而
+# verify-locks.py 與 guard-selfcheck.py --strict 兩支事後稽核都回報正常。
+#
+# 這一層是縱深防禦，不是主防線（Bash 寫一支腳本去改仍然穿得過去）——
+# 它買到的是「不會在沒有惡意的情況下自然發生」。
+
+HARNESS_SOURCE_TARGETS = [
+    "scripts/run-hidden-tests.py",
+    "scripts/hidden_vault.py",
+    "scripts/verify-locks.py",
+    "scripts/guard-hidden-tests.py",
+    "scripts/guard-selfcheck.py",
+    ".claude/settings.json",
+    ".claude/agents/verifier-reviewer.md",
+    "CLAUDE.md",
+    "harness.config.json",
+]
+
+
+@case("封存過 task 之後，Write 強制力本體（runner/簽章/稽核/guard/設定/準則）全部被擋")
+def _(tmp: Path):
+    write_manifest(tmp, default_vault(tmp) / "T1")
+    for target in HARNESS_SOURCE_TARGETS:
+        touch(tmp, target, "x\n")
+        result = run_guard(
+            tmp, {"tool_name": "Write", "tool_input": {"file_path": str(tmp / target)}}
+        )
+        assert result.returncode == 2, f"{target} 沒被擋：exit={result.returncode}"
+
+
+@case("封存過 task 之後，Edit 強制力本體同樣被擋")
+def _(tmp: Path):
+    write_manifest(tmp, default_vault(tmp) / "T1")
+    touch(tmp, "scripts/run-hidden-tests.py", "x\n")
+    result = run_guard(
+        tmp,
+        {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(tmp / "scripts/run-hidden-tests.py"),
+                "old_string": "x",
+                "new_string": "y",
+            },
+        },
+    )
+    assert result.returncode == 2, f"exit={result.returncode} stderr={result.stderr}"
+
+
+@case("強制力本體只擋寫入不擋讀取（implementer 有正當理由知道測試怎麼被執行）")
+def _(tmp: Path):
+    write_manifest(tmp, default_vault(tmp) / "T1")
+    touch(tmp, "scripts/run-hidden-tests.py", "x\n")
+    result = run_guard(
+        tmp,
+        {"tool_name": "Read", "tool_input": {"file_path": str(tmp / "scripts/run-hidden-tests.py")}},
+    )
+    assert result.returncode == 0, f"讀取被誤擋：exit={result.returncode} {result.stdout}"
+
+
+@case("還沒封存過任何 task 時不保護強制力本體（開發模板本身，scripts/ 就是產品）")
+def _(tmp: Path):
+    # 這個條件是刻意的：一律保護會讓維護 harness 的人被自己的 hook 擋住，
+    # 而「習慣性繞過」一旦養成，整層防護就等於沒有。
+    touch(tmp, "scripts/run-hidden-tests.py", "x\n")
+    result = run_guard(
+        tmp, {"tool_name": "Write", "tool_input": {"file_path": str(tmp / "scripts/run-hidden-tests.py")}}
+    )
+    assert result.returncode == 0, f"沒有封存過 task 就不該擋：exit={result.returncode}"
+
+
+@case("作廢留下的墓碑仍算封存過——「先作廢再改 runner」不能變成關掉保護的路")
+def _(tmp: Path):
+    (tmp / ".harness").mkdir(exist_ok=True)
+    (tmp / ".harness" / "hidden-manifest.json").write_text(
+        json.dumps({"version": 2, "tasks": {"T1": {"status": "discarded", "discard_count": 1}}}),
+        encoding="utf-8",
+    )
+    touch(tmp, "scripts/run-hidden-tests.py", "x\n")
+    result = run_guard(
+        tmp, {"tool_name": "Write", "tool_input": {"file_path": str(tmp / "scripts/run-hidden-tests.py")}}
+    )
+    assert result.returncode == 2, f"墓碑沒有維持保護：exit={result.returncode}"
+
+
+@case("Bash 寫入類動詞指到強制力本體也被擋（rm / mv / tee / 重導向）")
+def _(tmp: Path):
+    write_manifest(tmp, default_vault(tmp) / "T1")
+    touch(tmp, "scripts/run-hidden-tests.py", "x\n")
+    for command in [
+        "rm scripts/run-hidden-tests.py",
+        "mv /tmp/fake.py scripts/run-hidden-tests.py",
+        "echo x > scripts/run-hidden-tests.py",
+        "sed -i 's/a/b/' scripts/verify-locks.py",
+    ]:
+        result = run_guard(tmp, {"tool_name": "Bash", "tool_input": {"command": command}})
+        assert result.returncode == 2, f"「{command}」沒被擋：exit={result.returncode}"
+
+
+@case("強制力本體的保護不誤傷 templates/ 底下的範例（那是要給人看的）")
+def _(tmp: Path):
+    write_manifest(tmp, default_vault(tmp) / "T1")
+    touch(tmp, "templates/examples/demo/scripts/whatever.py", "x\n")
+    result = run_guard(
+        tmp,
+        {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(tmp / "templates/examples/demo/scripts/whatever.py")},
+        },
+    )
+    assert result.returncode == 0, f"範例被誤擋：exit={result.returncode} {result.stdout}"
+
+
+@case("強制力本體的保護不誤傷產出專案自己的原始碼")
+def _(tmp: Path):
+    write_manifest(tmp, default_vault(tmp) / "T1")
+    for target in ["src/app.py", "app/scripts.py", "scriptsy/x.py"]:
+        touch(tmp, target, "x\n")
+        result = run_guard(
+            tmp, {"tool_name": "Write", "tool_input": {"file_path": str(tmp / target)}}
+        )
+        assert result.returncode == 0, f"{target} 被誤擋：exit={result.returncode}"
 
 
 def main() -> int:

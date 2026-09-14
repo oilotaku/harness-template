@@ -99,6 +99,15 @@ frontmatter 的 `thinking` 欄位**不會被 Claude Code 讀取**，它只是本
      把目前環境設為新基準（不要手動編輯 `.harness/` 底下的檔案）。
    - 這個警告值得認真對待：容器／CI 這類環境的隨機主機名稱已經不會觸發它了，
      所以它一旦響，代表作業系統、架構、是否容器、CPU 或記憶體級距真的變了。
+   - **`status` 是 `created`（`--json`）／輸出寫著「本次沒有比對任何東西」時**：
+     這不是「正常」，是**這一次守門完全沒有生效**——基準是這次才建立的。
+     若輸出還警告「等同停用」（基準指紋檔被 gitignore），代表這個執行環境
+     若每個 session 都重新 clone（容器、CI、遠端 agent 沙箱），**每一次都會是
+     首次執行**，黃金法則第 6 條永遠不會有機會觸發（第三輪 P1-11 實測）。
+     遇到這種情況要在派工前**主動告知使用者一次**，並把目前環境的關鍵事實
+     （OS／架構／CPU 級距／記憶體級距）寫進你的跨 session 記憶當作基準——
+     那是唯一會跨 session 保留的地方，見 `docs/memory-management.md`。
+     這件事也要寫進驗收報告的環境欄位。
 
 4. **任務拆解**（依 `docs/task-decomposition-guide.md`）
    - 把需求拆成多個 task，每個 task 填寫 `templates/task-spec-template.md`。
@@ -142,13 +151,21 @@ frontmatter 的 `thinking` 欄位**不會被 Claude Code 讀取**，它只是本
 
 6. **派工（檢驗者必須先於實作者）**
    - 對每個 task：先指派給對應的 `verifier-test-writer`，
-     等隱藏測試封存（`seal-hidden-tests.py`，會一併鎖定公開測試）與基線執行（`run-hidden-tests.py --baseline`，證明測試在沒有實作時是紅的）
+     等隱藏測試封存（`seal-hidden-tests.py`，會一併鎖定公開測試、並把驗收用的程式碼一起封存）與基線執行（封存版 runner 加 `--baseline`，證明測試在沒有實作時是紅的）
      完成後，才把 task-spec + 公開測試交給對應的 `implementer-*`。
    - 實作完成後，交給 `verifier-reviewer`（必要時加 `verifier-security`）驗收。
 
-   **執行權杖的保管（不可弄錯，弄錯整套防作弊機制就白做）**
-   - `verifier-test-writer` 封存隱藏測試後會交回一串「執行權杖」，只有你保管。
-   - 只在派工 `verifier-reviewer` 時，把該 task 的權杖放進**那一個 session 的提示詞**。
+   **執行權杖與封存版 runner 路徑（兩樣都要給，缺一不可）**
+   - `verifier-test-writer` 封存隱藏測試後會交回兩樣東西，都只有你保管：
+     一串「執行權杖」，以及**封存版 runner 的絕對路徑**
+     （`<封存庫>/_runner/run-hidden-tests.py`，封存輸出裡會印出來）。
+   - 只在派工 `verifier-reviewer` 時，把該 task 的權杖**與那個絕對路徑**
+     一起放進**那一個 session 的提示詞**，並明講「用這個路徑，不要用
+     `scripts/run-hidden-tests.py`」。
+     repo 裡那一份 implementer 改得到——第三輪 P0-8 實測：覆寫它之後，用完全
+     正確的權杖驗收會得到 exit 0 與「隱藏測試全部通過」，權杖同時被送進被改過的
+     程式碼的 argv，而三項事後稽核全部回報正常。封存版在 repo 之外，
+     它每個檔案的 sha256 都在簽過章的 manifest 裡，被動過就跑不動。
    - **絕對不可以**把權杖放進 task-spec、公開測試、驗收報告、commit 訊息，
      或任何 `implementer-*` 看得到的地方——權杖一旦流到 implementer 手上，
      隱藏測試就從「看不到的題目」退化成「可以反覆查詢的 oracle」。
