@@ -123,7 +123,8 @@ OS 使用者」的子智能體——權杖會經過 Claude Code 的 transcript�
 |---|---|---|
 | `scripts/seal-hidden-tests.py` | **實體隔離**：鎖定公開測試 → 把暫存區的隱藏測試逐檔加密（每檔獨立金鑰）搬到 repo 之外 → 用權杖簽章 manifest，並產生一次性執行權杖。已進 git 歷史的檔案拒絕封存 | verifier-test-writer 寫完測試後 |
 | `scripts/run-hidden-tests.py` | 隱藏測試的**唯一執行入口**：驗 manifest 簽章 → 比對鎖定清單 sha256 → 解密執行。`--baseline` 證明測試在沒有實作時是紅的；正式模式記錄簽過章的嘗試次數 | test-writer 封存後（`--baseline`）、verifier-reviewer 驗收時 |
-| `scripts/hidden_vault.py` | 上面兩支共用的封存庫邏輯（加密、manifest、路徑規則） | 被 import，不直接執行 |
+| `scripts/discard-sealed-task.py` | **權杖遺失後的唯一出路**：刪掉再也解不開的密文、在 manifest 留下墓碑、指出重寫流程。不是救援路徑——作廢次數會帶進重新封存後簽過章的項目，歷史洗不白 | 權杖連同 session 一起消失時（最常見：執行測試時撞到用量上限） |
+| `scripts/hidden_vault.py` | 上面幾支共用的封存庫邏輯（加密、manifest、路徑規則） | 被 import，不直接執行 |
 | `scripts/harness_config.py` | 讀 `harness.config.json`：這個專案的測試路徑慣例（非 Python 專案一定要設） | 被 import，不直接執行 |
 | `scripts/guard-hidden-tests.py` | **事前攔截**：PreToolUse hook，擋下對暫存區、封存庫、`.harness/`（`progress/` 除外）與已鎖定公開測試的存取 | 每次工具呼叫（由 `.claude/settings.json` 掛上） |
 | `scripts/lock-tests.py` | 把公開測試的**路徑 + sha256** 寫進 `.harness/locked-tests.list`；清單的 sha256 會被 seal 簽進 manifest | 由 `seal-hidden-tests.py` 自動呼叫；封存後修了公開測試要重新封存，不是只重跑這支 |

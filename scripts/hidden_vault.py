@@ -61,6 +61,16 @@ MANIFEST_VERSION = 2
 KEYSTREAM_INFO = b"harness-hidden-tests-v2"
 MANIFEST_MAC_INFO = b"harness-manifest-mac-v1"
 
+# 權杖遺失後，`scripts/discard-sealed-task.py` 會把 manifest 項目換成這個狀態的
+# 「墓碑」。墓碑**沒有簽章**——簽章金鑰由權杖推導，而權杖正是遺失的那個東西。
+#
+# 這不構成新的攻擊面，理由值得寫清楚：墓碑的存在只會讓 runner 拒絕執行
+# （exit 2），永遠不會產生假的「隱藏測試全部通過」。也就是說，就算 implementer
+# 自己偽造一個墓碑，他換到的是「驗收無法進行」，不是「驗收通過」——那對他沒有
+# 好處，而且下一次封存會把 `discard_count` 累加進**簽過章**的新項目裡，
+# verifier-reviewer 看得到這個 task 被作廢過幾次。
+DISCARDED_STATUS = "discarded"
+
 # 測試指令範本裡唯三會被代換的 placeholder。用 str.replace 逐一代換而不是
 # str.format——第二輪 P2-9：Go 的 `-run '^Test{Foo}$'` 這種字面大括號會讓
 # format 丟 KeyError，runner 以 traceback 結束、exit 1，被 verifier 讀成「有測試失敗」。
@@ -234,6 +244,15 @@ def render_test_command(template: str, substitutions: dict) -> list:
 
 
 # ------------------------------------------------------------------- manifest
+
+
+def is_discarded(entry) -> bool:
+    """這個 manifest 項目是不是權杖遺失後留下的墓碑。
+
+    呼叫端必須在驗指紋/驗簽之前就問這件事：墓碑沒有 token_sha256 也沒有 signature，
+    直接拿去比對只會得到「權杖錯誤」這種會誤導人的訊息。
+    """
+    return isinstance(entry, dict) and entry.get("status") == DISCARDED_STATUS
 
 
 def load_manifest(root: Path = None) -> dict:

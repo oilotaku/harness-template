@@ -30,7 +30,11 @@
     也不可以傳給任何 implementer
 
 權杖遺失時沒有救援路徑（manifest 只存指紋），只能重新產生一份隱藏測試再封存一次。
-這是刻意的：留後門等於留繞過方式。
+這是刻意的：留後門等於留繞過方式。實務上最常見的遺失原因是「執行測試時撞到用量
+上限、握有權杖的 session 被回收」——那時先用 `scripts/discard-sealed-task.py`
+把解不開的密文作廢、在 manifest 留下墓碑，再依同一份 task-spec 重寫一份隱藏測試
+回到這裡重新封存。作廢過的 task 重新封存時，`discard_count` 會帶進**簽過章**的
+新項目，所以作廢不會把歷史洗白。
 """
 import argparse
 import shutil
@@ -221,6 +225,7 @@ def main() -> int:
     manifest = vault.load_manifest(root)
     previous_version = manifest.get("version")
     previous_entry = manifest.get("tasks", {}).get(args.task_id) or {}
+    was_discarded = vault.is_discarded(previous_entry)
     manifest["version"] = vault.MANIFEST_VERSION
     entry = {
         # 重新封存同一個 task 時把 runner 已記錄的嘗試筆數帶過來——attempts.json 是
@@ -228,6 +233,9 @@ def main() -> int:
         # 這個值來自舊 entry（舊權杖簽的，這裡驗不了）；被亂改的後果只會是
         # 「次數不可信 → should_stop 未知」，永遠不會變成假的「沒有失敗過」。
         "attempts_recorded": int(previous_entry.get("attempts_recorded") or 0),
+        # 這個 task 被作廢過幾次（權杖遺失）。帶進**簽過章**的項目裡，作廢才不會
+        # 把歷史洗白——墓碑本身沒有簽章，但一旦重新封存，這個數字就受簽章保護了。
+        "discard_count": int(previous_entry.get("discard_count") or 0),
         "sealed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "vault_dir": str(vault_dir),
         "task_dir": str(task_dir),
@@ -257,6 +265,11 @@ def main() -> int:
                 leftover.rmdir()
 
     print(f"task_id：{args.task_id}")
+    if was_discarded:
+        print(f"（這個 task 先前因權杖遺失被作廢過，累計 {entry['discard_count']} 次；"
+              "墓碑已由這次封存取代）")
+        print("（作廢次數與已記錄的嘗試筆數都已帶進新項目，並在簽章範圍內——"
+              "verifier-reviewer 要把「曾經作廢」寫進驗收報告）")
     print(f"來源暫存區：{staging_labels}")
     print(f"已封存 {len(entries)} 個隱藏測試檔案（每檔獨立金鑰）：")
     for item in entries:

@@ -98,3 +98,28 @@
   修正測試——但這個決定不能由 implementer 自己主張。
 - **task-spec 本身有歧義**：任何一方（implementer 或 verifier）發現都應該
   停下來回報 Orchestrator 向使用者確認，不要各自猜一個版本繼續做下去。
+- **執行權杖遺失**（最常見的原因：`verifier-reviewer` 執行隱藏測試時撞到用量上限，
+  那個 session 連同權杖一起沒了）：沒有救援路徑，manifest 只存指紋，密文永遠解不開。
+  處理方式是**作廢重來**，不是想辦法解密：
+
+  1. `python3 scripts/discard-sealed-task.py --task-id <id> --token-lost --confirm`
+     —— 刪掉再也用不到的密文，在 manifest 留下一塊墓碑
+  2. Orchestrator 帶著**同一份 task-spec** 重新派工 `verifier-test-writer` 重寫隱藏測試
+     （task-spec 不需要改；要改是另一回事）
+  3. 重新 `seal-hidden-tests.py` → 新權杖立刻做一次 `--baseline`
+  4. **implementer 不需要重做**：作廢的是測試，不是實作
+
+  作廢不會把歷史洗白：`discard_count` 會帶進重新封存後**簽過章**的項目，
+  `attempts_recorded` 也原封不動帶過去（改小它會被 `show-attempts` 判成「有紀錄被刪」）。
+  `verifier-reviewer` 要把「這個 task 曾經作廢過幾次」寫進驗收報告。
+
+  > 墓碑本身沒有簽章——簽章金鑰由權杖推導，而權杖正是遺失的那個東西。這不構成
+  > 新的攻擊面：墓碑的唯一效果是讓 runner **拒絕執行**，永遠不會產生假的「全部通過」。
+  > 偽造一個墓碑換到的是「驗收無法進行」，對 implementer 沒有好處，而且
+  > `guard-selfcheck.py` 每個 session 開始都會把墓碑列出來。
+- **解密後的明文殘留**：runner 把隱藏測試解密到**封存庫底下**（不是 `/tmp`），
+  正常結束、例外、可攔截的中止訊號都會刪掉它。行程被作業系統直接砍掉時
+  （撞上限、容器被回收）刪不成，明文會留在磁碟上——下一次執行、`--sweep`、
+  以及每個 session 開始的 `guard-selfcheck.py` 都會清掉並警告。
+  選擇封存庫而不是 `/tmp` 的理由就是這個殘留期間：封存庫在 `guard-hidden-tests.py`
+  的保護範圍內（不分動詞、指令字串裡出現就擋），`/tmp` 完全不受保護。

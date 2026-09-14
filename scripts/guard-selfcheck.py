@@ -49,6 +49,8 @@ def _repo_root() -> Path:
 REPO_ROOT = _repo_root()
 GUARD = REPO_ROOT / "scripts" / "guard-hidden-tests.py"
 VERIFY_LOCKS = REPO_ROOT / "scripts" / "verify-locks.py"
+RUN_HIDDEN = REPO_ROOT / "scripts" / "run-hidden-tests.py"
+HIDDEN_MANIFEST = REPO_ROOT / ".harness" / "hidden-manifest.json"
 
 # 探測用的路徑要跟設定檔一致，否則在自訂測試目錄的專案上會探到一個
 # 「本來就不受保護」的位置，然後回報一個假的失敗。
@@ -305,6 +307,58 @@ def check_locks() -> None:
         print("公開測試鎖定稽核：目前沒有可驗證的鎖定清單（尚未執行 lock-tests.py，屬正常起始狀態）。")
 
 
+def check_vault_state() -> None:
+    """兩件只有在 session 開始時看一眼才會被發現的事。
+
+    一、**解密殘留**：runner 把隱藏測試解密到封存庫底下，正常結束會刪掉，
+    但行程被作業系統直接砍掉時（撞到用量上限、容器被回收）刪不成，明文就一直
+    留在磁碟上。這裡順手清掉並說出來——「上一次執行是被砍掉的」本身就是
+    verifier 該知道的事。
+
+    二、**墓碑**：權杖遺失後 discard-sealed-task.py 會把 manifest 項目換成墓碑。
+    墓碑沒有簽章（權杖都沒了，簽不了），所以它不能靠自己證明真偽——但每個 session
+    開始都列出來，作廢就不會是一件安靜發生的事。
+    """
+    if RUN_HIDDEN.exists():
+        result = subprocess.run(
+            [sys.executable, str(RUN_HIDDEN), "--sweep"],
+            text=True, encoding="utf-8", errors="replace",
+            capture_output=True,
+            cwd=str(REPO_ROOT),
+            env={**os.environ, "CLAUDE_PROJECT_DIR": str(REPO_ROOT)},
+        )
+        for line in (result.stdout or "").splitlines():
+            # 只轉述警告；「沒有殘留」是常態，不需要每個 session 都講一次。
+            if line.startswith("⚠️") or line.startswith("   "):
+                print(line)
+
+    if not HIDDEN_MANIFEST.exists():
+        return
+    try:
+        manifest = json.loads(HIDDEN_MANIFEST.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        print("⚠️ 隱藏測試 manifest 讀不起來（檔案損壞或被改壞），"
+              "驗收前請先跑 `python3 scripts/run-hidden-tests.py --list` 確認。")
+        return
+
+    discarded, resealed = [], []
+    for task_id, info in sorted((manifest.get("tasks") or {}).items()):
+        if not isinstance(info, dict):
+            continue
+        if info.get("status") == "discarded":
+            discarded.append((task_id, info))
+        elif info.get("discard_count"):
+            resealed.append((task_id, info))
+
+    for task_id, info in discarded:
+        print(f"⚠️ task「{task_id}」的隱藏測試已作廢（權杖遺失，"
+              f"作廢於 {info.get('discarded_at', '未知時間')}）——")
+        print("   這個 task 目前沒有可執行的隱藏測試，要重寫一份再封存才能驗收。")
+    for task_id, info in resealed:
+        print(f"（task「{task_id}」曾因權杖遺失作廢過 {info['discard_count']} 次，"
+              "目前這份是重寫後重新封存的；驗收報告要記載這件事）")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="確認防作弊機制這次真的有生效")
     parser.add_argument(
@@ -341,6 +395,7 @@ def main() -> int:
     check_gitignore()
     check_unprotected_hidden_dirs()
     check_locks()
+    check_vault_state()
     print("===== 結束 =====")
 
     if args.strict and (failures or not config_ok):
