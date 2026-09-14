@@ -31,6 +31,8 @@
 | 公開測試不可被竄改 | 事前攔截有沒有成功 | 事後 sha256 稽核；清單本身的 sha256 也在簽過章的 manifest 裡，整份刪掉也查得出來 |
 | 隱藏測試真的有鑑別力 | 「檢驗者會寫好」 | 封存後強制做基線執行：沒有實作時必須是紅的，結果簽進 manifest |
 | 連續失敗 ≥3 次要停損 | implementer 自我申報 | 由執行測試的一方寫入、逐筆簽章的客觀次數；筆數也簽進 manifest，砍掉紀錄查得出來 |
+| bug 修的是根因不是症狀 | 「修完記得找同類」 | 公開放被回報的最小重現、隱藏放同類變體：公開綠 + 隱藏紅 = 只修了那一個 case |
+| 版本號不會漂 | 記得每個地方一起改 | README／程式／manifest 的版本宣告成 `mirrors`，一起更新、一起驗一致 |
 | 檢驗者不動手改實作 | 提示詞叮嚀 | 它沒有 `Write` 工具；skill 政策也擋掉會產生程式碼的 skill |
 | 文件、設定、CI 保持一致 | 記得同步 | 漂移測試——少同步一處就直接紅 |
 | 環境變了要停下來確認 | 使用者自己注意 | 環境指紋比對，且刻意**不把容器的隨機主機名當成環境變更**（總是誤報的守門等於沒有守門） |
@@ -39,7 +41,12 @@
 「用工具的正常用法碰到」這類**非刻意**的洩題，並讓**刻意**的繞過留下痕跡（簽章不符、
 稽核不符、嘗試次數對不上）。它**不擋**一個「決心繞過、而且跟 verifier 共用同一個
 OS 使用者」的子智能體——權杖會經過 Claude Code 的 transcript，解密後的明文在測試執行
-期間短暫存在於暫存目錄。那需要獨立的使用者或容器，超出本模板範圍。
+期間短暫存在於磁碟上。那需要獨立的使用者或容器，超出本模板範圍。
+
+明文解在**封存庫底下**而不是 `/tmp`，所以萬一行程被強制中斷（撞到用量上限、
+容器被回收）沒清乾淨，殘留至少落在 guard 擋得住的路徑裡；下一次執行、`--sweep`、
+以及每個 session 的自我檢查都會清掉並出聲。這是事後補救，不是預防——
+從被砍到下一次執行之間，明文確實還在。
 
 ## 快速開始
 
@@ -72,7 +79,17 @@ OS 使用者」的子智能體——權杖會經過 Claude Code 的 transcript�
    （`guard-selfcheck.py` 會在 session 開始時警告你）。範例見
    `docs/multi-language-support.md`。
 
-4. 在 Claude Code 中打開專案，讓 `Orchestrator`（見 `.claude/agents/orchestrator.md`）
+4. **建立版本號**（`guard-selfcheck.py` 會在 session 開始時提醒你還沒有）：
+
+   ```bash
+   python3 scripts/version.py --init
+   ```
+
+   模板產出的程式要有版本號——沒有的話，使用者回報「壞掉了」時沒有任何東西
+   可以定位是哪一版。版本要放哪、還寫在哪些地方（README、程式的 `--version`、
+   套件 manifest）都由 `harness.config.json` 宣告，見 `docs/versioning.md`。
+
+5. 在 Claude Code 中打開專案，讓 `Orchestrator`（見 `.claude/agents/orchestrator.md`）
    依 `docs/task-decomposition-guide.md` 拆解你的需求。拆解完、派工前它還會做兩件事：
 
    ```bash
@@ -80,10 +97,10 @@ OS 使用者」的子智能體——權杖會經過 Claude Code 的 transcript�
    python3 scripts/suggest-skills.py --role all --deliverable pdf       # 要不要裝 skill
    ```
 
-5. 依照 `docs/implementer-verifier-workflow.md` 的順序執行：
+6. 依照 `docs/implementer-verifier-workflow.md` 的順序執行：
    **檢驗者先寫測試 → 實作者才開始寫程式 → 檢驗者驗收**。
 
-6. 驗收不通過時，先看客觀次數再決定要不要再派一輪：
+7. 驗收不通過時，先看客觀次數再決定要不要再派一輪：
 
    ```bash
    python3 scripts/show-attempts.py --task-id <task_id>
@@ -96,13 +113,14 @@ OS 使用者」的子智能體——權杖會經過 Claude Code 的 transcript�
 | 路徑 | 用途 |
 |---|---|
 | `CLAUDE.md` | 全域規則（黃金法則、工作流程總覽） |
-| `.claude/agents/` | 子智能體定義（實作者 3 個、檢驗者 3 個） |
+| `.claude/agents/` | 子智能體定義（Orchestrator 1 個、實作者 3 個、檢驗者 3 個） |
 | `.claude/commands/` | `/task-plan` `/task-dispatch` `/machine-check` 斜線指令（用法見下） |
 | `scripts/` | 掃描、防作弊機制本體、決策輔助工具（見下面兩張表） |
-| `docs/` | **從零開始套用**、任務拆解、模型/思考分配、實作/檢驗分離、多語言支援、記憶管理、token 成本策略、根因分析與修正流程、執行時間預測、skill 安裝決策 |
+| `docs/` | **從零開始套用**、任務拆解、模型/思考分配、實作/檢驗分離、多語言支援、記憶管理、token 成本策略、根因分析與修正流程、**版本號**、執行時間預測、skill 安裝決策 |
 | `templates/` | task-spec、驗收報告、驗收標準對照表範本（含 `examples/` 的完整範例） |
 | `reports/` | 驗收報告落檔處（檢驗者沒有 `Write` 工具，由 Orchestrator 落檔） |
-| `harness.config.json` | （選用）這個專案的測試路徑慣例；非 Python 專案要設 |
+| `releases/` | 每個版本一個資料夾，存放那一版的完整原始碼（升版時自動產生，可關掉；見 `docs/versioning.md` §4.5） |
+| `harness.config.json` | （選用）這個專案的測試路徑慣例、版本號來源與顯示位置；非 Python 專案要設 |
 | `skills.catalog.json` | （選用）這個專案要裝哪些 skill、給誰 |
 
 ### 三個斜線指令的使用時機
@@ -128,10 +146,10 @@ OS 使用者」的子智能體——權杖會經過 Claude Code 的 transcript�
 | `scripts/harness_config.py` | 讀 `harness.config.json`：這個專案的測試路徑慣例與**版本號來源**（非 Python 專案一定要設） | 被 import，不直接執行 |
 | `scripts/version.py` | **產出專案的版本號**：讀寫 semver，支援純文字 / `package.json` / `pyproject.toml` 三種來源，寫回去不破壞檔案其他內容。`mirrors` 讓 README / 程式 / manifest 上的版本一起更新、一起驗一致。升版時把原始碼另存成 `releases/<版本>/`。只有 Orchestrator 能用，implementer 對版本檔與歸檔的寫入會被 guard 擋下（讀不擋） | 拆解任務前確認版本、一批需求驗收完成後升版 |
 | `scripts/release_archive.py` | 版本歸檔本體：每個版本各開一個資料夾存放完整原始碼。**隱藏測試暫存區一律排除**（進去等於從歸檔洩題），歸檔目錄自己也排除以免遞迴 | 被 `version.py` 呼叫，不直接執行 |
-| `scripts/guard-hidden-tests.py` | **事前攔截**：PreToolUse hook，擋下對暫存區、封存庫、`.harness/`（`progress/` 除外）與已鎖定公開測試的存取 | 每次工具呼叫（由 `.claude/settings.json` 掛上） |
+| `scripts/guard-hidden-tests.py` | **事前攔截**：PreToolUse hook，擋下對暫存區、封存庫、`.harness/`（`progress/` 除外）的存取；對已鎖定公開測試、版本檔、`releases/` 則**只擋寫入不擋讀取**（讀它們是正當用途） | 每次工具呼叫（由 `.claude/settings.json` 掛上） |
 | `scripts/lock-tests.py` | 把公開測試的**路徑 + sha256** 寫進 `.harness/locked-tests.list`；清單的 sha256 會被 seal 簽進 manifest | 由 `seal-hidden-tests.py` 自動呼叫；封存後修了公開測試要重新封存，不是只重跑這支 |
 | `scripts/verify-locks.py` | **事後稽核**：重算雜湊比對，抓出「事前攔截被繞過」的竄改 | verifier-reviewer 驗收的第一步 |
-| `scripts/guard-selfcheck.py` | **自我檢查**：用已知該被擋的 payload 實跑一次；另外掃出「看起來是隱藏測試、卻不在受保護路徑內」的目錄 | SessionStart hook |
+| `scripts/guard-selfcheck.py` | **自我檢查**：用已知該被擋的 payload 實跑一次；掃出「看起來是隱藏測試、卻不在受保護路徑內」的目錄；清掉上次被強制中斷留下的解密殘留；報告目前版本號與各處是否一致，以及有沒有因權杖遺失而作廢的 task | SessionStart hook |
 
 四層各擋不同的東西，缺一不可：
 
@@ -182,7 +200,7 @@ python3 scripts/test-guards.py && python3 scripts/test-locks.py \
   && python3 scripts/test-attempts.py && python3 scripts/test-version.py
 ```
 
-這九組（共 **290 個案例**）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
+這十組（共 **352 個案例**）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
 六種組合上自動執行，Linux 另外多跑一輪 `LC_ALL=C`（非 UTF-8 locale）
 （見 `.github/workflows/ci.yml`）。
 
