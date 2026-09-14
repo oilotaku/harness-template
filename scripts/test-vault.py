@@ -719,22 +719,101 @@ def _(tmp: Path):
 # ------------------------------------------- 權杖遺失：作廢重來，而不是留救援後門
 
 
-@case("權杖遺失後作廢：密文被刪、manifest 留下墓碑")
+@case("權杖遺失後作廢：密文移進作廢區（不是刪掉）、manifest 留下墓碑")
 def _(tmp: Path):
+    # 第三輪 P0-9 之前這裡是直接 rmtree，於是「作廢 + 刪墓碑」之後這個 task
+    # 曾經存在過的證據一點都不剩。密文沒有權杖本來就解不開，留著不增加洩題風險。
     repo = make_repo(tmp)
     seal(repo)
-    task_dir = Path(manifest_of(repo)["tasks"]["T1"]["task_dir"])
+    entry_before = manifest_of(repo)["tasks"]["T1"]
+    task_dir = Path(entry_before["task_dir"])
+    vault_dir = Path(entry_before["vault_dir"])
     assert task_dir.is_dir()
 
     result = run_script(DISCARD, repo, "--task-id", "T1", "--token-lost", "--confirm")
     assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
-    assert not task_dir.exists(), "密文沒有被刪掉"
+    assert not task_dir.exists(), "原本的封存目錄應該已經被搬走"
+
+    import hidden_vault as _vault
+
+    retired = sorted((vault_dir / _vault.DISCARDED_DIR_NAME).glob("T1-*"))
+    assert retired, "密文沒有被保留到作廢區"
+    kept = [p.name for p in retired[0].rglob("*") if p.is_file()]
+    assert kept == ["test_hidden.py.enc"], f"作廢區的內容不對：{kept}"
 
     entry = manifest_of(repo)["tasks"]["T1"]
     assert entry["status"] == "discarded", entry
     assert entry["reason"] == "token-lost", entry
     assert entry["discard_count"] == 1, entry
     assert entry["previous"]["file_count"] == 1, entry
+
+
+@case("作廢會清掉殘留的明文，只把密文留進作廢區")
+def _(tmp: Path):
+    # 權杖遺失前的最後一次執行，正是最可能被中斷、最可能把明文留在封存庫裡的那一次。
+    repo = make_repo(tmp)
+    seal(repo)
+    entry = manifest_of(repo)["tasks"]["T1"]
+    (Path(entry["task_dir"]) / "leftover_plain.py").write_text(
+        "self.assertEqual(answer, 42)\n", encoding="utf-8"
+    )
+
+    result = run_script(DISCARD, repo, "--task-id", "T1", "--token-lost", "--confirm")
+    assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
+
+    import hidden_vault as _vault
+
+    retired = sorted((Path(entry["vault_dir"]) / _vault.DISCARDED_DIR_NAME).glob("T1-*"))[0]
+    names = sorted(p.name for p in retired.rglob("*") if p.is_file())
+    assert "leftover_plain.py" not in names, f"殘留的明文跟著搬進作廢區了：{names}"
+    assert "test_hidden.py.enc" in names, names
+
+
+@case("封存與作廢都會寫進 repo 之外的流水帳（記指紋，不記權杖）")
+def _(tmp: Path):
+    repo = make_repo(tmp)
+    token = seal(repo)
+    import hidden_vault as _vault
+
+    vault_dir = Path(manifest_of(repo)["tasks"]["T1"]["vault_dir"])
+    log = (vault_dir / _vault.SEALED_LOG_NAME).read_text(encoding="utf-8")
+    assert token not in log, "流水帳裡出現了權杖本身"
+    assert _vault.token_fingerprint(token) in log, log
+
+    run_script(DISCARD, repo, "--task-id", "T1", "--token-lost", "--confirm")
+    events = [e["event"] for e in _vault.sealed_log_entries(vault_dir, "T1")]
+    assert events == ["sealed", "discarded"], events
+
+
+@case("刪掉墓碑退不回「從來沒封存過」——流水帳讓 runner 判定為竄改")
+def _(tmp: Path):
+    # 這正是第二輪 P0-7 對鎖定清單修掉的失效方式，從作廢這條路回來的版本。
+    repo = make_repo(tmp)
+    token = seal(repo)
+    run_script(DISCARD, repo, "--task-id", "T1", "--token-lost", "--confirm")
+
+    manifest = manifest_of(repo)
+    del manifest["tasks"]["T1"]
+    (repo / ".harness" / "hidden-manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+    )
+
+    result = run_script(RUN, repo, "--task-id", "T1", "--token", token)
+    assert result.returncode == 2, result.stdout
+    assert "封存過" in result.stderr, result.stderr
+    assert "不通過" in result.stderr, result.stderr
+
+
+@case("真的沒封存過的 task_id 不會被誤判成竄改（訊息必須分得出這兩件事）")
+def _(tmp: Path):
+    repo = make_repo(tmp)
+    token = seal(repo)
+    result = run_script(RUN, repo, "--task-id", "NEVER-SEALED", "--token", token)
+    assert result.returncode == 2, result.stdout
+    assert "封存紀錄在封存之後被刪除" not in result.stderr, (
+        f"把「沒封存過」誤判成竄改：{result.stderr}"
+    )
+    assert "manifest 裡沒有 task" in result.stderr, result.stderr
 
 
 @case("作廢需要 --token-lost 與 --confirm 兩個旗標，缺一就什麼都不動")

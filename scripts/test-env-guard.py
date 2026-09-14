@@ -15,6 +15,7 @@
 """
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -190,12 +191,62 @@ def _(tmp: Path):
 # ------------------------------------------------------------- 端對端行為
 
 
-@case("首次執行：建立基準並回傳 0")
+@case("首次執行：建立基準並回傳 0，而且明講「本次沒有比對任何東西」")
 def _(tmp: Path):
+    # 第三輪 P1-11 刻意翻轉的預期：這裡原本只斷言輸出裡有「首次執行」，
+    # 而當時那一段的最後一行寫的是「狀態：正常（首次執行）」。
+    # 那句話是錯的——首次執行什麼都沒比對，守門這一次完全沒生效。
+    # 在每個 session 都重新 clone 的環境裡，每一次都會是首次執行，
+    # 於是機制永遠不生效、卻永遠在說「正常」。
     result = run_guard(tmp)
     assert result.returncode == 0, f"exit={result.returncode} {result.stdout}{result.stderr}"
     assert fingerprint_file(tmp).exists(), "沒有寫出指紋檔"
-    assert "首次執行" in result.stdout, result.stdout
+    assert "沒有比對" in result.stdout, result.stdout
+    assert "狀態：正常（首次執行）" not in result.stdout, (
+        f"又把「什麼都沒比對」說成「正常」了：{result.stdout}"
+    )
+
+
+def _make_git_repo(tmp: Path, gitignore: str) -> bool:
+    """造一個真的 git repo，讓 git check-ignore 有東西可查。沒裝 git 就回 False。"""
+    if shutil.which("git") is None:
+        return False
+    (tmp / ".gitignore").write_text(gitignore, encoding="utf-8")
+    result = subprocess.run(
+        ["git", "init", "-q"], cwd=str(tmp), capture_output=True,
+        text=True, encoding="utf-8", errors="replace",
+    )
+    return result.returncode == 0
+
+
+@case("基準指紋檔被 gitignore 時，首次執行要警告「這個環境可能永遠是首次執行」")
+def _(tmp: Path):
+    # 這是 P1-11 的核心：.harness/ 被忽略是對的，但在每個 session 都重新 clone 的
+    # 環境裡，它代表基準永遠不會跨 session 存在——守門等同停用，而且沒有訊號。
+    if not _make_git_repo(tmp, ".harness/\n"):
+        return
+    result = run_guard(tmp)
+    assert result.returncode == 0, f"exit={result.returncode} {result.stdout}"
+    assert "等同停用" in result.stdout, result.stdout
+
+
+@case("基準指紋檔會跟著 repo 走時，不發那個警告（不該吵的不能吵）")
+def _(tmp: Path):
+    if not _make_git_repo(tmp, "node_modules/\n"):
+        return
+    result = run_guard(tmp)
+    assert result.returncode == 0, f"exit={result.returncode} {result.stdout}"
+    assert "等同停用" not in result.stdout, f"對會保留的基準誤報了：{result.stdout}"
+
+
+@case("--json 的 baseline_tracked 欄位：首次執行要說得出基準會不會被保留")
+def _(tmp: Path):
+    if not _make_git_repo(tmp, ".harness/\n"):
+        return
+    result = run_guard(tmp, "--json")
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "created", payload
+    assert payload["baseline_tracked"] is False, payload
 
 
 @case("同一台機器連續執行兩次：第二次仍然回傳 0（不會自己誤報）")

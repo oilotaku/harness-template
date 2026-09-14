@@ -99,6 +99,15 @@ frontmatter 的 `thinking` 欄位**不會被 Claude Code 讀取**，它只是本
      把目前環境設為新基準（不要手動編輯 `.harness/` 底下的檔案）。
    - 這個警告值得認真對待：容器／CI 這類環境的隨機主機名稱已經不會觸發它了，
      所以它一旦響，代表作業系統、架構、是否容器、CPU 或記憶體級距真的變了。
+   - **`status` 是 `created`（`--json`）／輸出寫著「本次沒有比對任何東西」時**：
+     這不是「正常」，是**這一次守門完全沒有生效**——基準是這次才建立的。
+     若輸出還警告「等同停用」（基準指紋檔被 gitignore），代表這個執行環境
+     若每個 session 都重新 clone（容器、CI、遠端 agent 沙箱），**每一次都會是
+     首次執行**，黃金法則第 6 條永遠不會有機會觸發（第三輪 P1-11 實測）。
+     遇到這種情況要在派工前**主動告知使用者一次**，並把目前環境的關鍵事實
+     （OS／架構／CPU 級距／記憶體級距）寫進你的跨 session 記憶當作基準——
+     那是唯一會跨 session 保留的地方，見 `docs/memory-management.md`。
+     這件事也要寫進驗收報告的環境欄位。
 
 4. **任務拆解**（依 `docs/task-decomposition-guide.md`）
    - 把需求拆成多個 task，每個 task 填寫 `templates/task-spec-template.md`。

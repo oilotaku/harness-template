@@ -59,6 +59,30 @@ CLAUDE.md          .claude/          scripts/          docs/          templates/
    **少了 PreToolUse 那個，事前攔截整層就不存在**，而且不會有任何錯誤訊息——
    下一步就是要抓這種情況。
 
+3. **建議再加上這組 `deny`**（第三輪 P0-8）。強制力本體——驗收 runner、簽章與
+   加密、事後稽核、guard 自己、hook 設定、檢驗者的行為準則——如果 implementer
+   改得到，驗收結果就可以被偽造：實測覆寫 `scripts/run-hidden-tests.py` 之後，
+   用**完全正確的權杖**執行驗收會得到 exit 0 與「隱藏測試全部通過」，
+   而三項事後稽核全部回報正常。
+
+   ```json
+   "deny": [
+     "Write(./scripts/**)", "Edit(./scripts/**)",
+     "Write(./.claude/**)", "Edit(./.claude/**)",
+     "Write(./CLAUDE.md)",  "Edit(./CLAUDE.md)",
+     "Write(./harness.config.json)", "Edit(./harness.config.json)"
+   ]
+   ```
+
+   guard 從第三輪起也會擋同一組路徑，但**只在這個 repo 封存過 task 之後**
+   （否則維護 harness 本身的人會被自己的 hook 擋住）。這組 deny 是第二層，
+   兩層都只是縱深防禦：拿得到 Bash 的子智能體寫一支腳本去改仍然穿得過去。
+   根本解是不要執行 repo 裡的程式碼，見
+   `docs/history/improvement-suggestions-round3.md` 的 P0-8 (a)。
+
+   > 模板自己的 repo **刻意沒有**這組 deny——它就是模板本身，`scripts/` 是它的
+   > 產品程式碼。你的專案不是這種情況，請加上。
+
 ---
 
 ## 2. 初始化

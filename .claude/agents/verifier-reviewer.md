@@ -66,8 +66,21 @@ frontmatter 的 `thinking` 欄位**不會被 Claude Code 讀取**，它只是本
    - runner 若印出「這份隱藏測試從未被證明過會紅」，代表 verifier-test-writer 沒做
      基線執行（`--baseline`）。一份全部 `assert True` 的隱藏測試也會「全部通過」，
      所以**這句話要寫進驗收報告**，並回報 Orchestrator 補做基線。
+   - 若回傳 2 且訊息是「**封存過**（流水帳有紀錄…）但 manifest 裡那一筆不見了」，
+     判定不通過並明確記載。這跟上面那幾種同一級：封存紀錄在封存之後被刪除了。
+   - 若回傳 2 且訊息只是「manifest 裡沒有 task」，**不要自己判斷成 Orchestrator
+     派工時 task_id 打錯**。第三輪 P0-9 實測：作廢一個 task 再把墓碑刪掉，
+     得到的訊息跟打錯字一模一樣。回報 Orchestrator 對照它的派工紀錄，由它判斷。
    - 若你手上沒有權杖，回報 Orchestrator 要，不要嘗試繞過——
      繞得過去就代表這套機制壞了。
+
+   > **這一步驗不到的事**（第三輪 P0-8，誠實記載）：上面每一項都假設
+   > `run-hidden-tests.py`、`verify-locks.py`、`hidden_vault.py` 還是原本那幾支。
+   > 它們住在 repo 裡，implementer 改得到——實測改掉 runner 之後，你會拿到
+   > exit 0 與「隱藏測試全部通過」，而 `guard-selfcheck.py --strict` 回報正常。
+   > 目前沒有機制能讓你在這個 session 裡確認這件事（誰來驗驗證者是個真的循環）。
+   > 所以：若驗收結果與你讀程式碼得到的印象明顯不符——實作看起來根本沒做完、
+   > 卻「全部通過」——**以你讀到的程式碼為準**，回報 Orchestrator 要求人工複核。
    - 若回傳 2 且訊息是「**封存已經被作廢**」，代表這個 task 的權杖遺失過，
      目前沒有可執行的隱藏測試。這不是你能排除的問題，也**不可以**當成通過：
      回報 Orchestrator 依作廢流程重寫並重新封存，你拿到新權杖再驗一次。

@@ -17,6 +17,44 @@
 
 ---
 
+## 落地紀錄（2026-09-14）
+
+| 項目 | 狀態 | 落地內容與偏離草案之處 |
+|---|---|---|
+| P2-10 文件訂正 | ✅ | README 保證表、README 與 workflow 文件的「它擋什麼、不擋什麼」、`hidden_vault.py` 模組說明四處。**把被證否的那句話留在原地劃掉、寫明為什麼**，而不是悄悄刪掉——不解釋的話，下一個人會再寫一次。 |
+| P0-8 (c) 事前層 | ✅ | guard 新增 `_is_harness_source_path()`：`scripts/`、`.claude/`、`CLAUDE.md`、`harness.config.json` 只擋寫入不擋讀取。**跟草案的差別：不是無條件生效**，見下方。 |
+| P1-10 提示詞可寫 | ✅ | 併入上一項（`.claude/agents/*.md` 與 `CLAUDE.md` 都在涵蓋範圍內）。 |
+| P0-9 作廢路徑 | ✅ | 作廢改成把密文**搬進** `<vault>/_discarded/<task_id>-<時間>/` 而不是刪掉，並清掉殘留明文；封存與作廢都往 repo 之外的 `_sealed.log` 追加一行（記權杖**指紋**）；runner 發現「流水帳有、manifest 沒有」時直接判定不通過。 |
+| P1-9 自我檢查涵蓋面 | ✅（部分） | `guard-selfcheck.py` 新增 `check_audit_scripts()`：用已知情境**實跑** `verify-locks.py`（相符回 0、竄改回 1），作法跟它對 guard 做的一樣。runner 與 `hidden_vault.py` 驗不了，所以改成**明講驗不了**——見下方。 |
+| P1-11 env-guard | ✅ | 首次執行不再印「狀態：正常（首次執行）」；基準指紋檔被 gitignore 時另外警告「這個環境若每次重新 clone，守門等同停用」。`--json` 新增 `baseline_tracked`。`orchestrator.md` 補上對 `created` 的處理。 |
+| P2-11 漂移測試基準 | ✅ | 判定基準從 `glob("test-*.py")` 換成「有 `if __name__ == "__main__"` 的入口腳本」。這條測試寫完當場就紅，抓出 `check-design-tokens.py` 與 `discard-sealed-task.py` 不在 allow 清單。 |
+| **P0-8 (a) 封存版 runner** | ❌ **未做** | 根本解，要動 seal／runner／派工指令三處，留給下一個 PR。**在它完成之前，上面的 (c) 只是縱深防禦**。 |
+| P0-8 (b) 稽核強制力面 | ❌ 未做（刻意） | 它只有在 (a) 成立後才有意義，見該節的「循環」說明。 |
+
+### 三個刻意偏離草案的決定
+
+1. **強制力面的保護不是無條件生效，而是「這個 repo 封存過 task 之後」才生效。**
+   草案沒提到這件事，實作時才發現：一律保護會讓**維護 harness 模板本身**的人
+   被自己的 hook 擋住（這個 repo 的 `scripts/` 就是它的產品程式碼）。而「習慣性
+   繞過自己的防護」一旦養成，整層就等於沒有。implementer 動手的時機恰好都在
+   某個 task 封存之後，所以用「有沒有封存過」當開關，涵蓋的正是需要涵蓋的那段時間。
+   作廢留下的墓碑也算數——否則「先作廢再改 runner」就是一條關掉保護的路
+   （有回歸測試守這一條）。
+
+2. **草案建議的 `deny` 規則沒有加進這個 repo 的 `settings.json`，改成寫進
+   `docs/getting-started.md` 的套用指南。** 同一個理由：`Write(./scripts/**)`
+   會讓模板本身無法維護。使用者的專案不是這種情況，所以那裡該加。
+
+3. **P1-9 沒有假裝解決「誰來驗驗證者」。** selfcheck 現在會實跑 `verify-locks.py`，
+   但 runner、`hidden_vault.py`、以及 selfcheck 自己都驗不了。與其做一個看起來
+   涵蓋完整、實際上有循環的檢查，不如**在輸出裡明講哪幾支驗不了、為什麼**，
+   並在 `verifier-reviewer.md` 補一條：驗收結果與你讀程式碼的印象明顯不符時，
+   以你讀到的程式碼為準。一個自稱涵蓋完整的稽核，比一個誠實承認範圍的稽核更危險。
+
+回歸測試：384 → **419 案例**（guards 90→98、vault 57→61、env-guard 16→19）。
+
+---
+
 ## 摘要：這一輪最大的問題
 
 前兩輪把信任根一路往外推：

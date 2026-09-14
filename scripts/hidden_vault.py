@@ -36,11 +36,18 @@ P0-6 / P0-7 / P1-5 / P2-9（manifest 版本 2）。
 就能還原隱藏測試的開頭（第二輪 P1-5，實測成立）。版本 2 把檔案路徑混進金鑰推導，
 每個檔案各自一條 keystream。
 
-**這套機制擋的是什麼、不擋什麼**（誠實版本，第二輪 P1-8）：它擋的是「順手看一眼」
-「習慣性搜整個 repo」「用工具的正常用法碰到」這類**非刻意**的洩題，並讓**刻意**的
-繞過留下痕跡（簽章不符、稽核不符）。它不擋一個「決心繞過、而且跟 verifier 共用
-同一個 OS 使用者」的子智能體——權杖會經過 Claude Code 的 transcript，解密後的明文
-在測試執行期間短暫存在於暫存目錄，那需要獨立的使用者或容器，超出本模板範圍。
+**這套機制擋的是什麼、不擋什麼**（誠實版本，第二輪 P1-8、第三輪 P0-8 修訂）：
+它擋的是「順手看一眼」「習慣性搜整個 repo」「用工具的正常用法碰到」這類**非刻意**的
+洩題。它不擋一個「決心繞過、而且跟 verifier 共用同一個 OS 使用者」的子智能體——
+權杖會經過 Claude Code 的 transcript，解密後的明文在測試執行期間短暫存在於暫存目錄，
+那需要獨立的使用者或容器，超出本模板範圍。
+
+這裡原本還寫著「並讓刻意的繞過留下痕跡（簽章不符、稽核不符）」。第三輪實測證否了
+那句話：**簽章保護的是這支模組產出的資料，不是讀它的那支程式**。改寫
+`run-hidden-tests.py`（或這個檔案本身）就能讓驗收 exit 0 並印「全部通過」，
+簽章完好、稽核乾淨。第三輪補上的事前層只是縱深防禦（Bash 仍穿得過去）；
+根本解是把驗收用的程式碼一起封存、由封存版執行——見
+`docs/history/improvement-suggestions-round3.md` 的 P0-8 (a)，尚未結案。
 """
 import hashlib
 import hmac
@@ -49,6 +56,7 @@ import os
 import secrets
 import shlex
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -159,6 +167,68 @@ def resolve_vault_dir(root: Path = None) -> Path:
     override = os.environ.get("HARNESS_HIDDEN_DIR")
     vault = Path(override).resolve() if override else default_vault_dir(root)
     return vault
+
+
+SEALED_LOG_NAME = "_sealed.log"
+DISCARDED_DIR_NAME = "_discarded"
+
+
+def sealed_log_path(vault: Path) -> Path:
+    """封存事件流水帳（第三輪 P0-9）。
+
+    它存在的理由只有一個：manifest 裡那一筆可以被整份刪掉，刪完之後
+    「被作廢」與「從來沒封存過」的訊息一模一樣，而後者看起來只是派工打錯字。
+    這份 log 在 repo 之外、只追加不覆寫，讓 runner 有第二個地方可以問
+    「這個 task 到底封存過沒有」。
+
+    它**不是**簽章保護的一部分：拿得到 Bash 的子智能體同樣寫得到封存庫。
+    它買到的是「抹掉痕跡要多做一件事」，不是「抹不掉」。
+    """
+    return vault / SEALED_LOG_NAME
+
+
+def append_sealed_log(vault: Path, task_id: str, event: str, token_sha256: str = "") -> None:
+    """追加一行 `<時間> <事件> <task_id> <權杖指紋>`。寫不進去不是致命錯誤——
+    封存本身已經成功，因為記不了流水帳而讓整個封存失敗只會更糟。"""
+    line = "  ".join(
+        [
+            datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            event,
+            task_id,
+            token_sha256 or "-",
+        ]
+    )
+    try:
+        vault.mkdir(parents=True, exist_ok=True)
+        with open(sealed_log_path(vault), "a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+    except OSError:
+        pass
+
+
+def sealed_log_entries(vault: Path, task_id: str) -> list:
+    """這個 task_id 在流水帳裡的所有紀錄（最舊在前）。讀不到就回空的。"""
+    path = sealed_log_path(vault)
+    if not path.is_file():
+        return []
+    entries = []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    for line in lines:
+        parts = line.split()
+        if len(parts) < 3 or parts[2] != task_id:
+            continue
+        entries.append(
+            {
+                "at": parts[0],
+                "event": parts[1],
+                "task_id": parts[2],
+                "token_sha256": parts[3] if len(parts) > 3 else "-",
+            }
+        )
+    return entries
 
 
 def assert_outside_repo(vault: Path, root: Path) -> None:

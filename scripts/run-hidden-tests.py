@@ -451,8 +451,48 @@ def main() -> int:
 
     info = manifest.get("tasks", {}).get(args.task_id)
     if not info:
+        # 第三輪 P0-9：這句話以前是中性的，跟「Orchestrator 派工時 task_id 打錯」
+        # 完全一樣——於是「作廢 + 刪掉墓碑」這條路可以退回「從來沒封存過」。
+        # 封存流水帳在 repo 之外，是第二個可以問「到底封存過沒有」的地方。
+        history = []
+        try:
+            history = vault.sealed_log_entries(
+                vault.resolve_vault_dir(root), args.task_id
+            )
+        except (OSError, ValueError):
+            history = []
+        if history and args.token:
+            fingerprint = vault.token_fingerprint(args.token)
+            if any(item["token_sha256"] == fingerprint for item in history):
+                print("===== 隱藏測試無法執行 =====", file=sys.stderr)
+                print(
+                    f"❌ task「{args.task_id}」**封存過**（流水帳有紀錄，而且權杖指紋對得上），"
+                    "但 manifest 裡那一筆不見了。",
+                    file=sys.stderr,
+                )
+                for item in history:
+                    print(f"   流水帳：{item['at']}  {item['event']}", file=sys.stderr)
+                print(
+                    "   這不是派工打錯 task_id——封存紀錄在封存之後被刪除了，"
+                    "這本身就是可疑訊號，跟「簽章不符」同一級。",
+                    file=sys.stderr,
+                )
+                print("   驗收判定：不通過。請回報 Orchestrator 對照派工紀錄。", file=sys.stderr)
+                return 2
+
         print(f"manifest 裡沒有 task「{args.task_id}」。", file=sys.stderr)
+        if history:
+            print(
+                "⚠️ 但封存流水帳裡有這個 task_id 的紀錄——若你確定曾經封存過，"
+                "請帶 --token 再執行一次以確認，並回報 Orchestrator。",
+                file=sys.stderr,
+            )
         print("可用 --list 查看有哪些已封存的 task。", file=sys.stderr)
+        print(
+            "若你確信這個 task 封存過，**不要**自己判斷成派工錯誤："
+            "請回報 Orchestrator 對照派工紀錄（第三輪 P0-9）。",
+            file=sys.stderr,
+        )
         return 2
 
     # 墓碑沒有 token_sha256 也沒有 signature，順序反過來只會得到「權杖錯誤」

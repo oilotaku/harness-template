@@ -264,6 +264,10 @@ def main() -> int:
     manifest["tasks"][args.task_id] = entry
     vault.save_manifest(manifest, root)
 
+    # 封存流水帳（第三輪 P0-9）：manifest 那一筆被整份刪掉時，runner 還有第二個
+    # 地方可以問「這個 task 封存過沒有」。記的是權杖**指紋**，不是權杖。
+    vault.append_sealed_log(vault_dir, args.task_id, "sealed", entry["token_sha256"])
+
     # 密文與 manifest 都已落地，現在才刪掉工作目錄裡的明文。
     for source, _relative in files:
         source.unlink()
