@@ -326,11 +326,17 @@ def _validate_design(value):
             f"`design` 必須是物件或 false（目前是 {type(value).__name__}）。"
         )
 
-    known = {"tokens"}
+    known = {"tokens", "confirmed"}
     unknown = [k for k in value if k not in known and not k.startswith("$")]
     if unknown:
         raise ConfigError(
             f"`design` 有無法辨識的欄位：{unknown}。可用欄位：{sorted(known)}。"
+        )
+
+    confirmed = value.get("confirmed", False)
+    if not isinstance(confirmed, bool):
+        raise ConfigError(
+            f"`design.confirmed` 必須是 true 或 false（目前是 {type(confirmed).__name__}）。"
         )
 
     target = value.get("tokens", "design.tokens.json")
@@ -342,7 +348,7 @@ def _validate_design(value):
     if Path(normalized).is_absolute():
         raise ConfigError(f"`design.tokens` 的「{target}」必須是相對於 repo 根目錄的路徑。")
 
-    return {"tokens": normalized}
+    return {"tokens": normalized, "confirmed": confirmed}
 
 
 def load(root: Path = None) -> dict:

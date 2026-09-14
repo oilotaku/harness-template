@@ -37,6 +37,7 @@
 | 版本號不會漂 | 記得每個地方一起改 | README／程式／manifest 的版本宣告成 `mirrors`，一起更新、一起驗一致 |
 | 畫面不會每個 task 一套 | 「照設計稿做」 | 顏色/間距/字級由專案宣告成角色化 token，實作者取用而不是發明 |
 | 可及性真的被驗到 | 「a11y 是隱性驗收標準」 | 對比度對明暗兩套逐組算 WCAG AA——預設色票第一版的深色邊框是 2.99、門檻 3.00，眼睛看不出來 |
+| 設計不會被默默套用 | 模板附什麼就用什麼 | 預設標記成「未經這個專案確認」，每個 session 提醒到有人真的問過使用者為止 |
 | 檢驗者不動手改實作 | 提示詞叮嚀 | 它沒有 `Write` 工具；skill 政策也擋掉會產生程式碼的 skill |
 | 文件、設定、CI 保持一致 | 記得同步 | 漂移測試——少同步一處就直接紅 |
 | 環境變了要停下來確認 | 使用者自己注意 | 環境指紋比對，且刻意**不把容器的隨機主機名當成環境變更**（總是誤報的守門等於沒有守門） |
@@ -125,7 +126,7 @@ OS 使用者」的子智能體——權杖會經過 Claude Code 的 transcript�
 | `reports/` | 驗收報告落檔處（檢驗者沒有 `Write` 工具，由 Orchestrator 落檔） |
 | `releases/` | 每個版本一個資料夾，存放那一版的完整原始碼（升版時自動產生，可關掉；見 `docs/versioning.md` §4.5） |
 | `VERSION` | 這個專案的版本號（位置可由 `harness.config.json` 改；只能由 `scripts/version.py` 寫入） |
-| `design.tokens.json` | 前端／GUI 的設計基準：角色化的顏色、間距、字級（沒有圖形介面的專案可用 `"design": false` 關掉） |
+| `design.tokens.json` | 前端／GUI 的設計基準：角色化的顏色、圓角、間距、字級、過渡（沒有圖形介面的專案可用 `"design": false` 關掉） |
 | `harness.config.json` | （選用）這個專案的測試路徑慣例、版本號來源與顯示位置；非 Python 專案要設 |
 | `skills.catalog.json` | （選用）這個專案要裝哪些 skill、給誰 |
 
@@ -208,7 +209,7 @@ python3 scripts/test-guards.py && python3 scripts/test-locks.py \
   && python3 scripts/test-design.py
 ```
 
-這十一組（共 **373 個案例**）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
+這十一組（共 **384 個案例**）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
 六種組合上自動執行，Linux 另外多跑一輪 `LC_ALL=C`（非 UTF-8 locale）
 （見 `.github/workflows/ci.yml`）。
 

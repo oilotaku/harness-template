@@ -11,5 +11,10 @@
 
     "$comment_archive": "模板自己關掉每版歸檔。它的使用者是 clone 這個 repo 的人，不是去 releases/ 撈某一版的人；而歸檔會讓 repo 每升一版就多一份完整副本。產出的專案預設是開著的。",
     "archive": false
+  },
+
+  "design": {
+    "$comment": "模板自己沒有圖形介面，但它要驗證自己附的那份色票，所以保持開啟。confirmed 在這裡是 true 因為這個 repo 就是這份預設的來源——clone 下去的專案要自己重新回答這個問題（見 docs/frontend-design-defaults.md §2）。",
+    "confirmed": true
   }
 }

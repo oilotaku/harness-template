@@ -73,6 +73,8 @@ def main() -> int:
             "ok": not problems and not failures,
             "source": settings["tokens"],
             "pairs_checked": len(results),
+            # 未確認不影響 ok：它是流程提醒，不是設計錯誤。
+            "confirmed": settings["confirmed"],
         }
         if problems:
             payload["structure_problems"] = problems
@@ -108,6 +110,17 @@ def main() -> int:
         print("   調整 design.tokens.json 裡對應角色的值，不要改門檻。", file=sys.stderr)
         print("===== 結束 =====")
         return 1
+
+    if not settings["confirmed"]:
+        print()
+        print("⚠️ 這份設計還沒有人跟使用者確認過。")
+        print("   模板附了一份預設色票，所以 clone 下來的專案會**默默繼承**一套美學——")
+        print("   而美學是使用者的決定，不是模板的。派工任何前端/GUI task 之前，")
+        print("   Orchestrator 要先問：要套用模板預設，還是你有自己的設計規範？")
+        print("   問過之後在 harness.config.json 設 `\"design\": { \"confirmed\": true }`。")
+        print("   （這不是錯誤，也刻意不讓它變成 CI 紅燈——紅燈只會逼人隨手填 true")
+        print("   　而不是真的去問，那比沒有檢查更糟。）")
+        print()
 
     # 餘裕最小的那一組值得講出來：卡在門檻邊緣的配對，下次有人微調顏色就會跌破。
     tightest = min(results, key=lambda r: r["ratio"] / r["required"])

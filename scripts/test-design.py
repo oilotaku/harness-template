@@ -275,6 +275,119 @@ def _(tmp: Path):
     assert "JSON" in (result.stdout + result.stderr), result.stderr
 
 
+# ------------------------------------------------- 圓角與過渡也是基準，不是裝飾
+
+
+@case("圓角階梯沒有嚴格由小到大會被抓到（pill 是哨兵值，不參與排序）")
+def _(tmp: Path):
+    data = base_tokens()
+    data["radius"]["lg"] = 4  # 比 md 小
+    assert any("radius" in p for p in tokens.check_structure(data)), tokens.check_structure(data)
+
+    data = base_tokens()
+    data["radius"]["pill"] = 9999
+    assert tokens.check_structure(data) == [], "pill 不該參與排序檢查"
+
+
+@case("缺少圓角階梯裡的任何一階都會被抓到")
+def _(tmp: Path):
+    for key in ("none", "sm", "md", "lg", "xl", "pill"):
+        data = base_tokens()
+        del data["radius"][key]
+        problems = tokens.check_structure(data)
+        assert any(key in p for p in problems), f"少了 radius.{key} 卻沒被抓到"
+
+
+@case("過渡時間沒有由短到長排序、或長到讓人等，都會被抓到")
+def _(tmp: Path):
+    data = base_tokens()
+    data["motion"]["duration"]["fast"] = 400  # 比 normal 長
+    assert any("排序" in p for p in tokens.check_structure(data)), tokens.check_structure(data)
+
+    data = base_tokens()
+    data["motion"]["duration"]["slow"] = 900
+    problems = tokens.check_structure(data)
+    assert any("讓人等" in p for p in problems), problems
+
+
+@case("reduced_motion 不是 respect 就會被擋下（忽略系統設定不是設計選項）")
+def _(tmp: Path):
+    for bad in ("ignore", "off", True, None):
+        data = base_tokens()
+        data["motion"]["reduced_motion"] = bad
+        problems = tokens.check_structure(data)
+        assert any("reduced_motion" in p for p in problems), f"{bad!r} 竟然被接受"
+
+
+@case("缺少 motion 區塊會被抓到（過渡沒基準就會每個畫面各寫一個數字）")
+def _(tmp: Path):
+    data = base_tokens()
+    del data["motion"]
+    assert any("motion" in p for p in tokens.check_structure(data))
+
+    data = base_tokens()
+    del data["motion"]["easing"]["standard"]
+    assert any("standard" in p for p in tokens.check_structure(data))
+
+
+# --------------------------------------- 不能默默套用：要問過使用者才算數
+
+
+@case("沒設 confirmed 時會提醒「還沒跟使用者確認過」，但**不當成失敗**")
+def _(tmp: Path):
+    repo = make_project(tmp, data=base_tokens())  # 沒有 harness.config.json
+    result = run(repo)
+    assert result.returncode == 0, "提醒不該變成失敗——紅燈只會逼人隨手填 true"
+    assert "還沒有人跟使用者確認過" in result.stdout, result.stdout
+    assert "confirmed" in result.stdout, result.stdout
+
+
+@case("設了 confirmed: true 之後就不再提醒")
+def _(tmp: Path):
+    repo = make_project(tmp, data=base_tokens(), config={"design": {"confirmed": True}})
+    result = run(repo)
+    assert result.returncode == 0, result.stderr
+    assert "還沒有人跟使用者確認過" not in result.stdout, result.stdout
+
+
+@case("design: false 視為已經回答過（那個答案就是「沒有圖形介面」）")
+def _(tmp: Path):
+    repo = make_project(tmp, config={"design": False})
+    payload = json.loads(run(repo, "--json").stdout)
+    assert payload["ok"] is True and payload.get("skipped"), payload
+
+
+@case("--json 帶出 confirmed，而且未確認不影響 ok")
+def _(tmp: Path):
+    repo = make_project(tmp, data=base_tokens())
+    payload = json.loads(run(repo, "--json").stdout)
+    assert payload["ok"] is True, "未確認不是設計錯誤"
+    assert payload["confirmed"] is False, payload
+
+    repo2 = make_project(tmp / "yes", data=base_tokens(), config={"design": {"confirmed": True}})
+    assert json.loads(run(repo2, "--json").stdout)["confirmed"] is True
+
+
+@case("confirmed 不是布林值時 fail-closed")
+def _(tmp: Path):
+    repo = make_project(tmp, data=base_tokens(), config={"design": {"confirmed": "yes"}})
+    result = run(repo)
+    assert result.returncode == 1, result.stdout
+    assert "confirmed" in (result.stdout + result.stderr), result.stderr
+
+
+@case("模板附的預設 token 有圓角與過渡，而且方向一致（圓角基調、過渡不過長）")
+def _(tmp: Path):
+    data = base_tokens()
+    assert data["radius"]["md"] >= 8, "md 圓角太小，跟『圓角設計』的方向不符"
+    assert data["motion"]["duration"]["normal"] <= 300, "一般過渡太長"
+    assert data["motion"]["reduced_motion"] == "respect"
+    # 柔和：避開純白與純黑
+    assert data["color"]["light"]["surface"].upper() != "#FFFFFF", "淺色底是純白，不夠柔和"
+    assert data["color"]["dark"]["surface"].upper() != "#000000", "深色底是純黑，不夠柔和"
+
+
+
 def main() -> int:
     failures = []
     with tempfile.TemporaryDirectory() as base:

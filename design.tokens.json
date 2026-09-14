@@ -1,62 +1,77 @@
 {
-  "$comment": "這個專案的設計基準。實作者依這份檔案決定顏色/間距/字級，不自己發明。角色命名與跨技術棧的映射見 docs/frontend-design-defaults.md。",
+  "$comment": "這個專案的設計基準。實作者依這份檔案決定顏色/圓角/間距/字級/動畫，不自己發明。角色命名與跨技術棧的映射見 docs/frontend-design-defaults.md。",
   "$schema_version": 1,
 
+  "$direction": "現代、圓角、柔和、直覺、有過渡。柔和與對比度是對立的——這裡的值是用 scripts/check-design-tokens.py 逼近出來的『最柔和但仍達 WCAG AA』，不是先挑好看再希望它過。",
+
   "spacing": {
-    "$comment": "4 的倍數。相鄰兩階差異夠明顯，排版才不會出現『看起來一樣但其實差 2px』的情況。",
+    "$comment": "4 的倍數。現代版面靠留白建立層次，所以階梯上端給得寬。",
     "unit": 4,
     "scale": [0, 4, 8, 12, 16, 24, 32, 48, 64, 96]
   },
 
   "radius": {
+    "$comment": "圓角基調。預設用 md；輸入框與按鈕 md，卡片與對話框 lg，大面板 xl，頭像與標籤 pill。none 只留給真的需要切齊的邊（表格、貼齊視窗的側欄）。",
     "none": 0,
-    "sm": 4,
-    "md": 8,
+    "sm": 6,
+    "md": 10,
     "lg": 16,
+    "xl": 24,
     "pill": 9999
   },
 
   "typography": {
-    "$comment": "scale 是字級（px 或各平台的等效單位）。base 是內文。",
+    "$comment": "scale 是字級（px 或各平台的等效單位）。層次靠字級與字重建立，不靠加框線。",
     "base": 16,
     "scale": [12, 14, 16, 20, 24, 32, 40],
     "line_height": { "tight": 1.25, "normal": 1.5, "relaxed": 1.75 },
     "weight": { "regular": 400, "medium": 500, "bold": 700 }
   },
 
+  "motion": {
+    "$comment": "過渡的作用是讓狀態改變看得出因果，不是裝飾。超過 slow 就開始讓人等。",
+    "duration": { "instant": 0, "fast": 120, "normal": 200, "slow": 320 },
+    "easing": {
+      "standard": "cubic-bezier(0.2, 0, 0, 1)",
+      "decelerate": "cubic-bezier(0, 0, 0, 1)",
+      "accelerate": "cubic-bezier(0.3, 0, 1, 1)"
+    },
+    "reduced_motion": "respect"
+  },
+
   "color": {
-    "$comment": "角色命名，不是色階命名。明暗兩套用同一組名字——切主題換的是值，不是名字。",
+    "$comment": "角色命名，不是色階命名。明暗兩套用同一組名字——切主題換的是值，不是名字。刻意避開純白與純黑：純白底配純黑字在長時間閱讀下是刺眼的。",
     "light": {
-      "surface": "#FFFFFF",
-      "surface-muted": "#F2F4F7",
-      "on-surface": "#16191D",
-      "on-surface-muted": "#515C6B",
-      "border": "#7E8899",
-      "primary": "#1F4FD8",
+      "surface": "#FCFCFB",
+      "surface-muted": "#F3F2EF",
+      "on-surface": "#2B2F36",
+      "on-surface-muted": "#5D646E",
+      "border": "#828790",
+      "primary": "#5266BE",
       "on-primary": "#FFFFFF",
-      "danger": "#B3261E",
+      "danger": "#B75048",
       "on-danger": "#FFFFFF",
-      "success": "#1B6E3C",
+      "success": "#42795C",
       "on-success": "#FFFFFF",
-      "warning": "#7A4E00",
+      "warning": "#8C682B",
       "on-warning": "#FFFFFF",
-      "focus": "#1F4FD8"
+      "focus": "#5266BE"
     },
     "dark": {
-      "surface": "#14171C",
-      "surface-muted": "#1E232B",
-      "on-surface": "#E9ECF1",
-      "on-surface-muted": "#A7B1BF",
-      "border": "#6E7887",
-      "primary": "#9CB6FF",
-      "on-primary": "#0B1020",
-      "danger": "#FFB4AB",
-      "on-danger": "#320F0C",
-      "success": "#86D9A4",
-      "on-success": "#062012",
-      "warning": "#F2C067",
-      "on-warning": "#2B1C00",
-      "focus": "#9CB6FF"
+      "surface": "#1A1C20",
+      "surface-muted": "#23262B",
+      "on-surface": "#E4E4E1",
+      "on-surface-muted": "#A0A6AE",
+      "border": "#767C86",
+      "primary": "#A6B6E6",
+      "on-primary": "#15192B",
+      "danger": "#E8A9A2",
+      "on-danger": "#2E1310",
+      "success": "#8CC3A5",
+      "on-success": "#0C2418",
+      "warning": "#DCBA7E",
+      "on-warning": "#2A1F08",
+      "focus": "#A6B6E6"
     }
   },
 
@@ -70,9 +85,11 @@
     { "foreground": "on-success", "background": "success", "level": "text" },
     { "foreground": "on-warning", "background": "warning", "level": "text" },
     { "foreground": "primary", "background": "surface", "level": "text" },
+    { "foreground": "primary", "background": "surface-muted", "level": "text" },
     { "foreground": "danger", "background": "surface", "level": "text" },
     { "foreground": "border", "background": "surface", "level": "non-text" },
     { "foreground": "border", "background": "surface-muted", "level": "non-text" },
-    { "foreground": "focus", "background": "surface", "level": "non-text" }
+    { "foreground": "focus", "background": "surface", "level": "non-text" },
+    { "foreground": "focus", "background": "surface-muted", "level": "non-text" }
   ]
 }

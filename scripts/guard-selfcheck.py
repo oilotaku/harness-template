@@ -51,6 +51,7 @@ GUARD = REPO_ROOT / "scripts" / "guard-hidden-tests.py"
 VERIFY_LOCKS = REPO_ROOT / "scripts" / "verify-locks.py"
 RUN_HIDDEN = REPO_ROOT / "scripts" / "run-hidden-tests.py"
 VERSION_SCRIPT = REPO_ROOT / "scripts" / "version.py"
+DESIGN_SCRIPT = REPO_ROOT / "scripts" / "check-design-tokens.py"
 HIDDEN_MANIFEST = REPO_ROOT / ".harness" / "hidden-manifest.json"
 
 # 探測用的路徑要跟設定檔一致，否則在自訂測試目錄的專案上會探到一個
@@ -355,6 +356,39 @@ def check_version() -> None:
     print("   使用者回報問題時將無法定位是哪一版。建立：python3 scripts/version.py --init")
 
 
+def check_design() -> None:
+    """設計基準有沒有被確認過。
+
+    模板附了一份預設色票，所以 clone 下來的專案會**默默繼承**一套美學——
+    而美學是使用者的決定，不是模板的。這裡每個 session 提醒一次，直到有人真的問過。
+    刻意只提醒不失敗：把它做成錯誤只會逼人隨手填 true 而不是真的去問。
+    """
+    if not DESIGN_SCRIPT.exists():
+        return
+    result = subprocess.run(
+        [sys.executable, str(DESIGN_SCRIPT), "--json"],
+        text=True, encoding="utf-8", errors="replace",
+        capture_output=True,
+        cwd=str(REPO_ROOT),
+        env={**os.environ, "CLAUDE_PROJECT_DIR": str(REPO_ROOT)},
+    )
+    try:
+        payload = json.loads(result.stdout)
+    except (json.JSONDecodeError, ValueError):
+        return  # 這支腳本本身的問題由它自己的測試守，不在這裡加雜訊
+
+    if payload.get("skipped"):
+        return
+    if not payload.get("ok"):
+        print("⚠️ 設計 token 檢查未通過——前端/GUI task 驗收前要先修："
+              "python3 scripts/check-design-tokens.py")
+        return
+    if not payload.get("confirmed", True):
+        print("⚠️ 設計基準還沒有跟使用者確認過（用模板預設還是你有自己的規範？）。")
+        print("   派工任何前端/GUI task 之前要先問；問過後在 harness.config.json 設")
+        print("   `\"design\": { \"confirmed\": true }`。見 docs/frontend-design-defaults.md §2。")
+
+
 def check_vault_state() -> None:
     """兩件只有在 session 開始時看一眼才會被發現的事。
 
@@ -445,6 +479,7 @@ def main() -> int:
     check_locks()
     check_vault_state()
     check_version()
+    check_design()
     print("===== 結束 =====")
 
     if args.strict and (failures or not config_ok):

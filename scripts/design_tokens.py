@@ -29,7 +29,7 @@
 
 不決定任何值好不好看。它只做兩件可以客觀判定的事：
 
-1. **結構完整**：該有的角色都在、明暗兩套一致、值是合法的顏色
+1. **結構完整**：該有的角色都在、明暗兩套一致、顏色合法、圓角與過渡的階梯排得出順序
 2. **對比度達標**：宣告成必須可讀的配對，實際算出來要過 WCAG AA
 
 第 2 點是這整份東西唯一能機械化的部分，也正是最容易在人工檢查裡被漏掉的部分——
@@ -66,6 +66,19 @@ REQUIRED_ROLES = (
 )
 
 THEMES = ("light", "dark")
+
+# 圓角階梯。`pill` 是「整個做成膠囊」的哨兵值，不參與由小到大的檢查。
+REQUIRED_RADIUS = ("none", "sm", "md", "lg", "xl", "pill")
+RADIUS_ORDERED = ("none", "sm", "md", "lg", "xl")
+
+# 動畫過渡。過渡的作用是讓狀態改變看得出因果，所以時間要有階梯、曲線要具名，
+# 不是每個畫面各寫一個數字。
+REQUIRED_DURATIONS = ("instant", "fast", "normal", "slow")
+DURATIONS_ORDERED = REQUIRED_DURATIONS
+REQUIRED_EASINGS = ("standard", "decelerate", "accelerate")
+
+# 超過這個長度的過渡就開始讓人等，而不是幫人理解。毫秒。
+MAX_REASONABLE_DURATION = 500
 
 HEX_PATTERN = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 
@@ -118,14 +131,25 @@ def settings_of(config: dict) -> dict:
     """從 harness.config.json 取出設計 token 的設定。
 
     `design: false` 代表這個專案沒有圖形介面，不檢查——CLI 與函式庫專案本來就
-    不該被逼著維護一份用不到的色票。
+    不該被逼著維護一份用不到的色票（那也算「問過了」，所以 confirmed 視為 True）。
+
+    `confirmed` 記的是「有沒有人問過使用者：要用模板預設，還是你有自己的設計」。
+    模板附了一份色票，所以 clone 下來的專案會默默繼承一套美學——沒有這個旗標的話，
+    那件事會安靜地發生。
     """
     raw = config.get("design")
     if raw is False:
-        return {"enabled": False, "tokens": DEFAULT_TOKENS_FILE}
+        return {"enabled": False, "tokens": DEFAULT_TOKENS_FILE, "confirmed": True}
     if raw is None:
         raw = {}
-    return {"enabled": True, "tokens": raw.get("tokens", DEFAULT_TOKENS_FILE)}
+    return {
+        "enabled": True,
+        "tokens": raw.get("tokens", DEFAULT_TOKENS_FILE),
+        # 「有人問過使用者要用預設還是自己的設計」——沒問過就是 False。
+        # 模板附了一份色票，clone 下來的專案會**默默繼承**一套美學，
+        # 這個旗標就是為了讓那件事不安靜。
+        "confirmed": bool(raw.get("confirmed", False)),
+    }
 
 
 def load(root: Path, settings: dict) -> dict:
@@ -161,6 +185,66 @@ def _check_scale(data: dict, section: str, key: str, problems: list) -> None:
         problems.append(f"`{section}.{key}` 必須由小到大排序（讓「大一階」有明確意義）。")
     if len(set(values)) != len(values):
         problems.append(f"`{section}.{key}` 有重複的值。")
+
+
+def _check_radius(data: dict, problems: list) -> None:
+    block = data.get("radius")
+    if not isinstance(block, dict):
+        problems.append("缺少 `radius` 區塊（或它不是物件）。")
+        return
+    for key in REQUIRED_RADIUS:
+        value = block.get(key)
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
+            problems.append(f"`radius.{key}` 必須是非負數字。")
+    ordered = [block.get(k) for k in RADIUS_ORDERED]
+    if all(isinstance(v, (int, float)) for v in ordered):
+        if ordered != sorted(ordered) or len(set(ordered)) != len(ordered):
+            problems.append(
+                "`radius` 的 none→xl 必須嚴格由小到大，"
+                "否則「大一階」沒有意義（`pill` 是哨兵值，不參與排序）。"
+            )
+
+
+def _check_motion(data: dict, problems: list) -> None:
+    block = data.get("motion")
+    if not isinstance(block, dict):
+        problems.append("缺少 `motion` 區塊（或它不是物件）。過渡沒有基準就會每個畫面各寫一個數字。")
+        return
+
+    durations = block.get("duration")
+    if not isinstance(durations, dict):
+        problems.append("缺少 `motion.duration`（或它不是物件）。")
+    else:
+        for key in REQUIRED_DURATIONS:
+            value = durations.get(key)
+            if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
+                problems.append(f"`motion.duration.{key}` 必須是非負數字（毫秒）。")
+            elif value > MAX_REASONABLE_DURATION:
+                problems.append(
+                    f"`motion.duration.{key}` 是 {value}ms，超過 {MAX_REASONABLE_DURATION}ms。"
+                    "那個長度的過渡是在讓人等，不是在幫人理解因果。"
+                )
+        ordered = [durations.get(k) for k in DURATIONS_ORDERED]
+        if all(isinstance(v, (int, float)) for v in ordered) and ordered != sorted(ordered):
+            problems.append(f"`motion.duration` 必須由短到長排序：{list(DURATIONS_ORDERED)}。")
+
+    easings = block.get("easing")
+    if not isinstance(easings, dict):
+        problems.append("缺少 `motion.easing`（或它不是物件）。")
+    else:
+        for key in REQUIRED_EASINGS:
+            value = easings.get(key)
+            if not isinstance(value, str) or not value.strip():
+                problems.append(f"`motion.easing.{key}` 必須是非空字串（各平台的等效曲線寫法）。")
+
+    reduced = block.get("reduced_motion")
+    if reduced != "respect":
+        problems.append(
+            "`motion.reduced_motion` 必須是 \"respect\"。"
+            "忽略使用者的「減少動態效果」系統設定不是一個設計選項——"
+            "對前庭功能敏感的人來說，那會造成實際的不適。"
+            "寫成明確的值而不是預設值，是為了讓「我們想過這件事」留下紀錄。"
+        )
 
 
 def check_structure(data: dict) -> list:
@@ -204,6 +288,8 @@ def check_structure(data: dict) -> list:
 
     _check_scale(data, "spacing", "scale", problems)
     _check_scale(data, "typography", "scale", problems)
+    _check_radius(data, problems)
+    _check_motion(data, problems)
 
     pairs = data.get("contrast_pairs")
     if not isinstance(pairs, list) or not pairs:

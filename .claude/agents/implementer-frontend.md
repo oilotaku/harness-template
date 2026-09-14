@@ -41,7 +41,10 @@ frontmatter 的 `thinking` 欄位**不會被 Claude Code 讀取**，它只是本
      「如果是深色就改用另一個顏色」這種分支。
    - 把 token 映射成目標框架的慣用寫法**一次，全專案共用**（CSS custom properties、
      Flutter `ColorScheme`、SwiftUI Asset Catalog、Qt `QPalette`、WPF `ResourceDictionary`
-     ……對照表見文件 §3），不要每個畫面各讀一次 JSON。
+     ……對照表見文件 §5），不要每個畫面各讀一次 JSON。
+   - **圓角與過渡也一樣**：圓角用 `radius` 階梯（預設 `md`，同一畫面不要超過三種）；
+     過渡用 `motion` 的時間與具名曲線，而且**一定要尊重「減少動態效果」的系統設定**
+     ——那不是可選項，對前庭功能敏感的人會造成實際不適。用法見文件 §6。
    - **需要一個 token 裡沒有的值時，先停下來**：多半是用錯角色（想要「淡一點的文字」
      就是 `on-surface-muted`，不是新顏色）。真的缺角色就回報 Orchestrator——
      改設計基準會影響所有畫面，不該夾帶在某個功能 task 裡（禁止事項第 4 條）。
