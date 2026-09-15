@@ -1,3 +1,5 @@
+<!-- 語言 / Language: **繁體中文** · [English](README.en.md) -->
+
 # Harness 工程模板
 
 [![CI](https://github.com/oilotaku/harness-template/actions/workflows/ci.yml/badge.svg)](https://github.com/oilotaku/harness-template/actions/workflows/ci.yml)
