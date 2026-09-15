@@ -1,3 +1,5 @@
+<!-- 語言 / Language: **繁體中文** · [English](ci-verification.en.md) -->
+
 # CI 驗收：把驗收搬出 implementer 的執行環境
 
 > 對應第四輪 P0。這是本模板目前唯一一個**不在加層**的改動——

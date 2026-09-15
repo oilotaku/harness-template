@@ -1,3 +1,5 @@
+<!-- 語言 / Language: **繁體中文** · [English](protection-levels.en.md) -->
+
 # 保護等級：minimal 與 full
 
 > 對應第四輪 P1。這份文件講的是 `harness.config.json` 的 `protection` 區塊：

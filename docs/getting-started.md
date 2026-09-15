@@ -1,3 +1,5 @@
+<!-- 語言 / Language: **繁體中文** · [English](getting-started.en.md) -->
+
 # 從零開始套用這個模板
 
 這份文件的讀者是**手上什麼都還沒有**的人。目標是：從一台乾淨的機器開始，
@@ -310,10 +312,10 @@ python3 scripts/test-guards.py && python3 scripts/test-locks.py \
   && python3 scripts/test-timing.py && python3 scripts/test-skills.py \
   && python3 scripts/test-attempts.py && python3 scripts/test-version.py \
   && python3 scripts/test-design.py && python3 scripts/test-ci-verify.py \
-  && python3 scripts/test-protection-levels.py
+  && python3 scripts/test-protection-levels.py && python3 scripts/test-setup.py
 ```
 
-十三組、452 個案例應該全數通過。這也是最快的「我裝完整了嗎」檢查。
+十四組、466 個案例應該全數通過。這也是最快的「我裝完整了嗎」檢查。
 
 ---
 
