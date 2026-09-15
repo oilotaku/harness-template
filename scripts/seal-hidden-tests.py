@@ -124,6 +124,23 @@ def lock_public_tests(root: Path) -> int:
     return result.returncode
 
 
+def export_ci_bundle(root: Path, task_id: str, token: str) -> int:
+    """把密文包匯出到 `ci/sealed/`（第四輪 P0，protection.ci_verification = true 時）。
+
+    用 importlib 載入 export-sealed-task.py 而不是 subprocess：權杖就不必出現在
+    另一個行程的 argv 裡（同一台機器上任何行程都看得到 argv）。
+    """
+    import importlib.util
+
+    path = SCRIPTS_DIR / "export-sealed-task.py"
+    spec = importlib.util.spec_from_file_location("export_sealed_task", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    # expect_baseline=False：這個時間點基線執行還沒發生，警告它「還沒做基線」
+    # 只會每次封存都出現一次，而每次都出現的警告等於沒有警告。
+    return module.export(root, task_id, token, expect_baseline=False)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="鎖定公開測試、封存隱藏測試到 repo 之外並加密、簽章 manifest")
     parser.add_argument("--task-id", required=True, help="這批隱藏測試對應的 task_id")
@@ -150,6 +167,16 @@ def main() -> int:
     args = parser.parse_args()
 
     root = vault.repo_root()
+
+    # 保護等級要在封存前就確定：minimal 少了三層，而封存本身的行為也跟著不同
+    # （不鎖公開測試）。設定壞掉一律擋下，不猜。
+    try:
+        protection = vault.protection(root)
+    except Exception as exc:  # noqa: BLE001 — ConfigError 或讀檔問題都一樣要擋下
+        print(f"拒絕封存：harness.config.json 有問題，無法判定保護等級：{exc}", file=sys.stderr)
+        return 1
+    minimal = protection["level"] == "minimal"
+
     staging_dirs = vault.staging_dirs(root)
     staging_labels = "、".join(
         str(d.relative_to(root)) if d.is_relative_to(root) else str(d) for d in staging_dirs
@@ -196,11 +223,18 @@ def main() -> int:
         print(f"拒絕封存：{exc}", file=sys.stderr)
         return 1
 
-    print("先鎖定公開測試：")
-    if lock_public_tests(root) != 0:
-        print("拒絕封存：鎖定公開測試失敗，封存必須建立在已鎖定的清單上。", file=sys.stderr)
-        return 1
-    locked_sha = vault.sha256_file(vault.locked_list_path(root))
+    if minimal:
+        # minimal 只留第 1 層。公開測試不鎖，manifest 也就沒有 locked_tests_sha256——
+        # runner 之後不會拿「沒有清單」當異常。代價講在前面，不要等到驗收才發現。
+        print(f"⚠️ {vault.MINIMAL_NOTICE}")
+        print("   這次封存**不會**鎖定公開測試，之後公開測試被改不會有人抓到。")
+        locked_sha = None
+    else:
+        print("先鎖定公開測試：")
+        if lock_public_tests(root) != 0:
+            print("拒絕封存：鎖定公開測試失敗，封存必須建立在已鎖定的清單上。", file=sys.stderr)
+            return 1
+        locked_sha = vault.sha256_file(vault.locked_list_path(root))
 
     task_dir = vault_dir / args.task_id
     if task_dir.exists():
@@ -289,7 +323,26 @@ def main() -> int:
             if leftover.is_dir() and not any(leftover.iterdir()):
                 leftover.rmdir()
 
+    # CI 驗收（第四輪 P0）：宣告了就順手匯出，不要讓「封存了但忘了匯出」
+    # 變成一個安靜的缺口——那會讓 CI 上驗的是上一次封存的題目。
+    ci_exported = False
+    if protection["ci_verification"]:
+        print()
+        print("protection.ci_verification = true，接著匯出 CI 驗收用的密文包：")
+        if export_ci_bundle(root, args.task_id, token) != 0:
+            print("⚠️ 密文包匯出失敗——封存本身已經完成（權杖在下面），", file=sys.stderr)
+            print("   但 CI 上還沒有這個 task 的題目。請手動執行 "
+                  "`python3 scripts/export-sealed-task.py`。", file=sys.stderr)
+        else:
+            ci_exported = True
+        print()
+
     print(f"task_id：{args.task_id}")
+    if minimal:
+        print(f"保護等級：**minimal**——{vault.MINIMAL_NOTICE}")
+    if ci_exported:
+        print(f"CI 驗收密文包：{vault.ci_task_dir(root, args.task_id).relative_to(root).as_posix()}/"
+              "（要 commit 進預設分支才會生效）")
     if was_discarded:
         print(f"（這個 task 先前因權杖遺失被作廢過，累計 {entry['discard_count']} 次；"
               "墓碑已由這次封存取代）")
@@ -331,6 +384,20 @@ def main() -> int:
     print("verifier-reviewer 驗收時執行（**用這個絕對路徑，不要用 repo 裡那一份**）：")
     print(f'  python3 "{sealed_runner}" --task-id {args.task_id} --token <權杖>')
     print()
+    if ci_exported:
+        print("這個專案宣告了 CI 驗收，所以上面那一跑是**本機的第二意見**，不是正式驗收：")
+        print(f"  1. 基線執行做完之後**再匯出一次**：")
+        print(f"     python3 scripts/export-sealed-task.py --task-id {args.task_id} --token <權杖>")
+        print("     基線結果會改寫簽過章的 manifest 項目，剛才那一份密文包是在那之前")
+        print("     匯出的——不重匯的話，CI 會一直說這份隱藏測試沒有基線紀錄。")
+        print(f"  2. 把 {vault.CI_SEALED_DIR}/{args.task_id}/ commit 進**預設分支**")
+        print("  3. 把權杖寫進 repository secret `HARNESS_VERIFY_TOKENS`")
+        print("  4. 正式驗收由 .github/workflows/verify-hidden-tests.yml 在 PR 上跑，")
+        print("     明細是加密的 artifact，用 scripts/read-ci-report.py 解開")
+        print("  為什麼 CI 上那一跑才算數：它跟 implementer 不同機器、不同使用者，")
+        print("  workflow 與密文包都來自預設分支——他在自己的分支上能改的東西，")
+        print("  一件都不參與那次驗收。見 docs/ci-verification.md。")
+        print()
     print("為什麼不是 `python3 scripts/run-hidden-tests.py`：repo 裡那一份 implementer")
     print("改得到——第三輪實測，覆寫它之後用完全正確的權杖驗收會得到 exit 0 與")
     print("「隱藏測試全部通過」，而三項事後稽核都回報正常。封存版在 repo 之外，")

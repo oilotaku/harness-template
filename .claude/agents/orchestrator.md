@@ -171,6 +171,18 @@ frontmatter 的 `thinking` 欄位**不會被 Claude Code 讀取**，它只是本
      隱藏測試就從「看不到的題目」退化成「可以反覆查詢的 oracle」。
    - 驗收若因測試本身有誤需要重寫，`verifier-test-writer` 重新封存會產生**新權杖**，
      舊的立即失效，記得替換。
+
+   **CI 驗收（`protection.ci_verification` 是 true 時）**
+   - 封存後多兩件事要做，而且**只有人做得了**（你要做的是提醒與追蹤）：
+     1. `ci/sealed/<task_id>/` 要 commit 進**預設分支**
+     2. 權杖要存進 repository secret `HARNESS_VERIFY_TOKENS`
+   - 這兩件事沒做完之前不要派工 implementer。CI 上的驗收會因為「沒東西可驗」
+     而回傳成功——那跟「全部通過」長得一模一樣，是整套流程最安靜的失效方式。
+   - 派工 `verifier-reviewer` 時要明講：**正式驗收是 PR 上那個 check，不是本機那一跑**；
+     明細在加密的 artifact 裡，用 `scripts/read-ci-report.py` 加權杖解開。
+   - 權杖仍然照上面的規則保管：secret 是給 CI 的，不是可以拿來省掉保密的理由。
+     task 結束後把那一行從 secret 裡拿掉。
+   - 細節與這個作法自己的信任根見 `docs/ci-verification.md`。
    - 權杖遺失沒有救援路徑，只能請 `verifier-test-writer` 重寫並重新封存。
      最常見的遺失原因是**執行測試時撞到用量上限、握有權杖的 session 被回收**。
      發生時照這個順序走，不要對著解不開的密文反覆試：

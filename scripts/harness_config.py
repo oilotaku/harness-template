@@ -84,6 +84,29 @@ Go / Rust / 純腳本專案常常就是一個 `VERSION` 檔。
 理由跟已鎖定的公開測試一樣：它是治理資訊，不是實作的一部分。
 
 
+## `protection`：這個專案要開幾層防護、驗收跑在哪裡
+
+```json
+{
+  "protection": { "level": "minimal", "ci_verification": false }
+}
+```
+
+`level` 只有兩個值：
+
+| 值 | 開著的層 | 代價 |
+|---|---|---|
+| `minimal` | 只有第 1 層（實體隔離：加密封存到 repo 之外 + 權杖 + manifest 簽章） | 不必裝 hook、不必鎖公開測試；換來的是「公開測試被改不會被抓到」 |
+| `full`（預設） | 四層全開 | 要裝 hook、每次封存都會鎖定公開測試 |
+
+`ci_verification` 宣告「這個專案的驗收跑在 GitHub Actions 上」。設成 `true` 之後，
+封存會順便把密文包匯出到 `ci/sealed/`，而 `guard-selfcheck.py` 會檢查
+「宣告了 CI 驗收、但密文包是空的」這種漂移。見 `docs/ci-verification.md`。
+
+**關掉的層一定會被講出來**：`minimal` 不是靜靜少跑幾個檢查，
+`seal` / `run` / `guard-selfcheck` 每次都會明講「這個專案只開了第 1 層」。
+理由跟這個模組開頭那段一樣——保護少一層而沒有訊號，比沒有保護更危險。
+
 ## 為什麼設定錯誤要 fail-closed
 
 載入失敗時本模組丟例外，而 `guard-hidden-tests.py` 的頂層處理會把任何例外
@@ -103,6 +126,15 @@ DEFAULT_HIDDEN_TEST_PATHS = ["tests/hidden"]
 DEFAULT_HIDDEN_TEST_COMMAND = "{python} -m unittest discover -s {dir} -p 'test_*.py' -v"
 
 PATH_KEYS = ("public_test_paths", "hidden_test_paths")
+
+# 保護等級。`minimal` 只留第 1 層（實體隔離），`full` 是四層全開。
+# 為什麼要有這個選項、關掉的那幾層各自放棄了什麼，見 docs/protection-levels.md。
+PROTECTION_LEVELS = ("minimal", "full")
+DEFAULT_PROTECTION_LEVEL = "full"
+
+# CI 驗收用的密文包位置（repo 內、會進版控）。裡面是密文與簽過章的 manifest 項目：
+# implementer 讀得到但解不開，改得動但改了就簽不回去。見 docs/ci-verification.md。
+CI_SEALED_DIR = "ci/sealed"
 
 # 產出的專案的版本來源。預設是一個純文字 VERSION 檔——對任何語言都成立，
 # 而且不需要專案先有 package.json / pyproject.toml 這類檔案。
@@ -148,6 +180,40 @@ def _validate_paths(value, key: str) -> list:
             )
         cleaned.append(normalized)
     return cleaned
+
+
+def _validate_protection(value) -> dict:
+    """驗證 `protection` 區塊：這個專案要開幾層防護、驗收跑在哪裡。
+
+    跟其他欄位一樣 fail-closed。這一塊尤其不能靜靜退回預設值——`level` 打錯字
+    如果被忽略，使用者以為自己開的是 minimal（於是沒裝 hook），實際上程式仍然
+    照 full 走，那會得到「一堆看起來壞掉的警告」；反過來打錯成 minimal 卻被
+    忽略，則是「以為四層都在、其實只有一層」。兩個方向都不可接受。
+    """
+    if not isinstance(value, dict):
+        raise ConfigError(f"`protection` 必須是物件（目前是 {type(value).__name__}）。")
+
+    known = {"level", "ci_verification"}
+    unknown = [k for k in value if k not in known and not k.startswith("$")]
+    if unknown:
+        raise ConfigError(
+            f"`protection` 有無法辨識的欄位：{unknown}。可用欄位：{sorted(known)}。"
+        )
+
+    level = value.get("level", DEFAULT_PROTECTION_LEVEL)
+    if level not in PROTECTION_LEVELS:
+        raise ConfigError(
+            f"`protection.level` 必須是 {list(PROTECTION_LEVELS)} 其中之一，收到 {level!r}。"
+            "（minimal＝只留實體隔離；full＝四層全開。見 docs/protection-levels.md）"
+        )
+
+    ci = value.get("ci_verification", False)
+    if not isinstance(ci, bool):
+        raise ConfigError(
+            f"`protection.ci_verification` 必須是 true 或 false（目前是 {type(ci).__name__}）。"
+        )
+
+    return {"level": level, "ci_verification": ci}
 
 
 def _validate_version(value) -> dict:
@@ -370,6 +436,10 @@ def load(root: Path = None) -> dict:
             "archive": None,
         },
         "design": None,
+        "protection": {
+            "level": DEFAULT_PROTECTION_LEVEL,
+            "ci_verification": False,
+        },
         "_source": "預設值（沒有 harness.config.json）",
     }
 
@@ -384,7 +454,7 @@ def load(root: Path = None) -> dict:
     if not isinstance(raw, dict):
         raise ConfigError(f"{CONFIG_FILENAME} 的最外層必須是物件（{{...}}）。")
 
-    known = set(PATH_KEYS) | {"hidden_test_command", "version", "design"}
+    known = set(PATH_KEYS) | {"hidden_test_command", "version", "design", "protection"}
     unknown = [key for key in raw if key not in known and not key.startswith("$")]
     if unknown:
         raise ConfigError(
@@ -413,6 +483,9 @@ def load(root: Path = None) -> dict:
 
     if "design" in raw:
         config["design"] = _validate_design(raw["design"])
+
+    if "protection" in raw:
+        config["protection"] = _validate_protection(raw["protection"])
 
     config["_source"] = str(path)
     return config

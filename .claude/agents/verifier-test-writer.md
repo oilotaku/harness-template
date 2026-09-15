@@ -83,7 +83,14 @@ frontmatter 的 `thinking` 欄位**不會被 Claude Code 讀取**，它只是本
    結果會簽進 manifest。全綠代表沒有鑑別力（一份全部 `assert True` 的測試也會
    「全部通過」）——修正測試後重新封存。這也是你唯一能確認「隱藏測試至少跑得起來」
    的機會：封存之後明文就沒了，語法錯誤到驗收時才發現只能憑記憶重寫。
-4. **執行權杖**：封存腳本會印出一串只出現這一次的權杖。做完基線執行後把它原封不動交回
+4. **CI 驗收的密文包**（只在 `harness.config.json` 的 `protection.ci_verification`
+   是 true 時）：封存會順手把密文包匯出到 `ci/sealed/<task_id>/`。
+   你要做的只有一件事——在交付裡**明確寫出「這個 task 的密文包要 commit 進預設分支、
+   權杖要存進 repository secret `HARNESS_VERIFY_TOKENS`」**，並提醒 Orchestrator
+   這兩件事沒做完之前，CI 上的驗收會因為「沒東西可驗」而回傳成功。
+   那跟「全部通過」長得一模一樣，是這套流程最安靜的失效方式。
+   （見 `docs/ci-verification.md`。）
+5. **執行權杖**：封存腳本會印出一串只出現這一次的權杖。做完基線執行後把它原封不動交回
    Orchestrator，**你自己不要留存**。權杖遺失沒有救援路徑（manifest 只存指紋），
    只能重寫一份隱藏測試再封存一次——這是刻意的，留後門等於留繞過方式。
 

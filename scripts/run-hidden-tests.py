@@ -70,7 +70,6 @@ exit code：
 import argparse
 import atexit
 import os
-import re
 import shutil
 import signal
 import subprocess
@@ -129,43 +128,14 @@ except ImportError as _exc:
 utf8_output.enable()  # Windows 主控台預設用 ANSI 代碼頁，不先切 UTF-8 會印不出中文
 
 
-# 測試指令「一個測試都沒跑到」卻回傳 0 的常見輸出特徵。
-# 這件事在這套機制裡特別危險：verifier-reviewer 會把 exit 0 讀成「隱藏測試全過」，
-# 於是一個什麼都沒驗到的實作就這樣通過驗收。實測觸發過的例子：
-# `unittest discover` 不會遞迴進沒有 __init__.py 的子目錄，檔案放巢狀就變成 Ran 0 tests。
-ZERO_TEST_SIGNATURES = (
-    "ran 0 tests",  # unittest
-    "no tests ran",  # pytest
-    "collected 0 items",  # pytest
-    "no tests found",  # 多數 runner
-    "no test files",  # go test
-    "no test files found",  # vitest
-    "0 passing",  # mocha
-)
-
-# 從輸出裡估「跑了幾個測試」——只用來記進 baseline，解析不到就 None，不猜。
-TEST_COUNT_PATTERNS = (
-    re.compile(r"\bRan (\d+) tests?\b"),  # unittest
-    re.compile(r"\b(\d+) (?:passed|failed)\b"),  # pytest / vitest
-    re.compile(r"\b(\d+) (?:passing|failing)\b"),  # mocha
-)
-
-
-def looks_like_zero_tests(output: str) -> bool:
-    lowered = output.lower()
-    return any(signature in lowered for signature in ZERO_TEST_SIGNATURES)
-
-
-def count_tests_seen(output: str):
-    total = 0
-    matched = False
-    for pattern in TEST_COUNT_PATTERNS:
-        for found in pattern.findall(output):
-            total += int(found)
-            matched = True
-        if matched:
-            return total
-    return None
+# 零測試偵測搬到 hidden_vault.py 了（第四輪 P0）：現在有**兩個**執行入口——
+# 本機的這一支，與 CI 上的 ci-verify.py。同一件事有兩份判準就會漂，而漂掉的
+# 那一份會安靜地把「一個測試都沒跑到」讀成「通過」。這裡保留名稱是為了
+# 既有的呼叫端（test-config.py 直接載入本模組測這個函式）。
+ZERO_TEST_SIGNATURES = vault.ZERO_TEST_SIGNATURES
+TEST_COUNT_PATTERNS = vault.TEST_COUNT_PATTERNS
+looks_like_zero_tests = vault.looks_like_zero_tests
+count_tests_seen = vault.count_tests_seen
 
 
 def list_tasks(manifest: dict) -> int:
@@ -549,6 +519,17 @@ def main() -> int:
     root = vault.repo_root()
     manifest = vault.load_manifest(root)
 
+    # 保護等級要在任何事情之前確定：minimal 的專案少了三層，而「少了三層」
+    # 必須在每一次驗收時被講出來，否則讀報告的人會以為四層都在。
+    # 設定壞掉時一律 exit 2，不猜也不退回預設值（理由見 harness_config.py 結尾）。
+    try:
+        minimal = vault.is_minimal(root)
+    except Exception as exc:  # noqa: BLE001 — ConfigError 或任何讀檔問題都一樣要擋下
+        print(f"harness.config.json 有問題，無法判定保護等級：{exc}", file=sys.stderr)
+        print("設定壞掉時一律擋下驗收——用一個 typo 就能關掉保護而且沒有訊號，"
+              "是這套機制最不能接受的失效方式。", file=sys.stderr)
+        return 2
+
     # 掃殘留要在任何模式下都先做一次：上一次執行若是被 SIGKILL 砍掉的，
     # 明文從那時起就一直留在磁碟上，愈早清掉愈好。
     swept = sweep_stale(known_vault_dirs(manifest, root))
@@ -749,6 +730,9 @@ def main() -> int:
             print("種類：**bugfix**——這批隱藏測試是同一個根因的其他變體，")
             print("      被回報的那一個最小重現在公開測試裡（implementer 看得到）。")
         print(f"檔案數：{len(info.get('files', []))}（manifest 簽章已驗證）")
+        if minimal:
+            print(f"⚠️ {vault.MINIMAL_NOTICE}")
+            print("   驗收報告要寫明這一點：這次驗收沒有公開測試鎖定與事後稽核。")
         print(f"指令：{command}")
         print("（工作目錄為 repo 根目錄，解密後的暫存目錄在測試結束後會立刻刪除）")
         if not args.baseline and not info.get("baseline"):
@@ -866,6 +850,22 @@ def finish_baseline(manifest, info, args, root, returncode, zero, output) -> int
         print("   不是「每個變體都紅」。混進一個修正前就綠的變體，這裡看不出來——")
         print("   請自己對著上面的輸出確認每個變體都失敗了，再交回權杖。")
     print("已把基線結果寫進簽過章的 manifest；這一跑**不計入**停損次數。")
+
+    # 基線結果改寫了簽過章的項目，所以封存當下匯出的那份密文包已經舊了。
+    # 不重匯的話 CI 會一直說「這份隱藏測試沒有基線紀錄」——一個永遠出現的警告
+    # 等於沒有警告，而這裡是唯一知道「剛剛才改寫過」的時機。
+    try:
+        ci_on = vault.protection(root)["ci_verification"]
+    except Exception:  # noqa: BLE001 — 提醒失敗不該讓一次成功的基線變成錯誤
+        ci_on = False
+    if ci_on:
+        print()
+        print("⚠️ 這個專案開了 CI 驗收，而剛才的基線結果改寫了簽過章的 manifest 項目——")
+        print("   **請重新匯出密文包**，否則 CI 上會一直說這份隱藏測試沒有基線紀錄：")
+        print(f"     python3 scripts/export-sealed-task.py --task-id {args.task_id} --token <權杖>")
+        print("   重匯之後把 ci/sealed/ 的變更 commit 進預設分支。")
+        print()
+
     print("接下來把權杖交回 Orchestrator，自己不要留存。")
     return 0
 

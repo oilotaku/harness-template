@@ -1329,6 +1329,54 @@ def _(tmp: Path):
         assert result.returncode == 0, f"{target} 被誤擋：exit={result.returncode}"
 
 
+@case("CI 驗收密文包只擋寫入，不擋讀取（讀到的是密文，改了才有意義）")
+def _(tmp: Path):
+    touch(tmp, "ci/sealed/T1/entry.json", "{}\n")
+    blocked = run_guard(
+        tmp, {"tool_name": "Write", "tool_input": {"file_path": "ci/sealed/T1/entry.json"}}
+    )
+    assert blocked.returncode == 2, f"密文包可以被改寫：exit={blocked.returncode}"
+
+    allowed = run_guard(
+        tmp, {"tool_name": "Read", "tool_input": {"file_path": "ci/sealed/T1/entry.json"}}
+    )
+    assert allowed.returncode == 0, f"讀密文包被誤擋：exit={allowed.returncode} {allowed.stdout}"
+
+
+@case("Bash 改寫 CI 驗收密文包同樣被擋")
+def _(tmp: Path):
+    touch(tmp, "ci/sealed/T1/test_x.py.enc", "x\n")
+    for command in [
+        "rm ci/sealed/T1/test_x.py.enc",
+        "echo x >" + " ci/sealed/T1/test_x.py.enc",
+    ]:
+        result = run_guard(tmp, {"tool_name": "Bash", "tool_input": {"command": command}})
+        assert result.returncode == 2, f"「{command}」沒被擋：exit={result.returncode}"
+
+
+@case("封存過 task 之後，workflow 檔案也算強制力本體（CI 驗收的信任根）")
+def _(tmp: Path):
+    write_manifest(tmp, default_vault(tmp) / "T1")
+    touch(tmp, ".github/workflows/verify-hidden-tests.yml", "name: x\n")
+    blocked = run_guard(
+        tmp,
+        {
+            "tool_name": "Write",
+            "tool_input": {"file_path": ".github/workflows/verify-hidden-tests.yml"},
+        },
+    )
+    assert blocked.returncode == 2, f"workflow 可以被改寫：exit={blocked.returncode}"
+
+    allowed = run_guard(
+        tmp,
+        {
+            "tool_name": "Read",
+            "tool_input": {"file_path": ".github/workflows/verify-hidden-tests.yml"},
+        },
+    )
+    assert allowed.returncode == 0, f"讀 workflow 被誤擋：exit={allowed.returncode}"
+
+
 def main() -> int:
     failures = []
     with tempfile.TemporaryDirectory() as base:

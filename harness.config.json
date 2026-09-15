@@ -13,6 +13,12 @@
     "archive": false
   },
 
+  "protection": {
+    "$comment": "這個模板自己四層全開——它就是那四層的來源。clone 下去的專案可以改成 minimal，代價寫在 docs/protection-levels.md §3。ci_verification 這裡是 false：這個 repo 沒有自己的隱藏測試要驗，verify-hidden-tests.yml 會因為沒有密文包而直接通過。",
+    "level": "full",
+    "ci_verification": false
+  },
+
   "design": {
     "$comment": "模板自己沒有圖形介面，但它要驗證自己附的那份色票，所以保持開啟。confirmed 在這裡是 true 因為這個 repo 就是這份預設的來源——clone 下去的專案要自己重新回答這個問題（見 docs/frontend-design-defaults.md §2）。",
     "confirmed": true

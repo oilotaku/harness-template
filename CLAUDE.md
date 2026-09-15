@@ -15,6 +15,9 @@
    這條規則不是靠自律，而是靠機制落實：隱藏測試寫完後會被**加密封存到 repo 之外**
    （`scripts/seal-hidden-tests.py`），解密執行需要只交給檢驗者的權杖。
    細節見 `docs/implementer-verifier-workflow.md`。
+   **這條規則的上限寫在 `docs/ci-verification.md` §1**：只要驗收與被驗收跑在
+   同一個 OS 使用者底下，任何自我檢查都可以被「連檢查自己那一段一起換掉」繞過。
+   要跨過那個上限，驗收得跑在 implementer 構不到的地方（CI），不是再加一層。
 2. **檢驗者必須先寫測試，才可以讓實作者開始實作**（防止先射箭再畫靶）。
 3. **實作者與檢驗者是不同的子智能體 session，禁止共用上下文**，避免互相污染判斷。
 4. **實作者嚴禁超出任務規格範圍發揮**（禁止幻覺出未要求的功能、禁止「順手重構」不相關程式碼）。
@@ -57,6 +60,14 @@
           ▼
    [Orchestrator] 彙整結果、產出驗收報告 (templates/verification-report-template.md)
 ```
+
+> **正式驗收在哪裡跑，由 `harness.config.json` 的 `protection.ci_verification` 決定。**
+> 設成 `true` 時，上圖第三步的權威來源是 GitHub Actions 上那一跑，本機那一跑降為
+> 「第二意見」；兩邊不一致要當成可疑訊號，不是環境差異。見 `docs/ci-verification.md`。
+>
+> **保護強度由 `protection.level` 決定**：`full`（預設，四層）或 `minimal`（只留
+> 實體隔離）。關掉的層在封存、驗收、每個 session 都會被講出來——保護少一層而沒有
+> 訊號，比沒有保護更危險。見 `docs/protection-levels.md`。
 
 > 驗收不通過、測試變紅、CI 掛掉、防護機制誤擋或漏擋時，一律走
 > `docs/root-cause-and-fix.md` 的步驟（先重現、先定位、先讓測試變紅，才修）。
@@ -105,7 +116,10 @@ harness-template/
 │   └── settings.json             ← 權限與 hook 設定範例
 ├── harness.config.json           ← （選用）專案自己的測試路徑慣例；非 Python 專案要設
 ├── skills.catalog.json           ← （選用）這個專案要裝哪些 skill、給誰；見 docs/skill-selection.md
-├── .github/workflows/ci.yml      ← CI：三平台 × 兩個 Python 版本跑全部回歸測試
+├── .github/workflows/
+│   ├── ci.yml                    ← 三平台 × 兩個 Python 版本跑全部回歸測試
+│   └── verify-hidden-tests.yml   ← **隱藏測試的正式驗收**（見 docs/ci-verification.md）
+├── ci/sealed/                    ← CI 驗收用的密文包；要 commit 進預設分支才生效
 ├── scripts/                      ← 機器效能 / 服務掃描 / 環境守門腳本
 │                                    + 防作弊機制本體（封存、鎖定、稽核、hook）
 ├── tests/                        ← 預設的測試位置，可由 harness.config.json 覆寫

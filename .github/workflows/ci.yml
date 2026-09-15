@@ -83,6 +83,12 @@ jobs:
       - name: 設計 token 回歸測試（對比度算得對、預設色票不退化、結構退化抓得到）
         run: python scripts/test-design.py
 
+      - name: CI 驗收回歸測試（密文包、job log 不洩題、子行程拿不到權杖）
+        run: python scripts/test-ci-verify.py
+
+      - name: 保護等級回歸測試（minimal 真的少跑三層，而且每次都講出來）
+        run: python scripts/test-protection-levels.py
+
       - name: 模板自己附的設計 token 必須達 WCAG AA
         run: python scripts/check-design-tokens.py
 
@@ -104,6 +110,8 @@ jobs:
           python -X utf8=0 scripts/test-attempts.py
           python -X utf8=0 scripts/test-version.py
           python -X utf8=0 scripts/test-design.py
+          python -X utf8=0 scripts/test-ci-verify.py
+          python -X utf8=0 scripts/test-protection-levels.py
 
       - name: 範例流程仍可重跑
         working-directory: templates/examples/demo-fizzbuzz
