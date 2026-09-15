@@ -77,8 +77,9 @@ CLAUDE.md          .claude/          scripts/          docs/          templates/
    guard 從第三輪起也會擋同一組路徑，但**只在這個 repo 封存過 task 之後**
    （否則維護 harness 本身的人會被自己的 hook 擋住）。這組 deny 是第二層，
    兩層都只是縱深防禦：拿得到 Bash 的子智能體寫一支腳本去改仍然穿得過去。
-   根本解是不要執行 repo 裡的程式碼，見
-   `docs/history/improvement-suggestions-round3.md` 的 P0-8 (a)。
+   根本解是不要執行 repo 裡的程式碼——第三輪封存驗收程式碼（P0-8 (a)，記錄在
+   git 歷史，見 `docs/history/README.md`），第四輪更進一步把驗收搬到 CI
+   （見 `docs/ci-verification.md`）。
 
    > 模板自己的 repo **刻意沒有**這組 deny——它就是模板本身，`scripts/` 是它的
    > 產品程式碼。你的專案不是這種情況，請加上。
@@ -160,6 +161,37 @@ python3 scripts/guard-selfcheck.py
 設定寫錯時腳本會**直接報錯**，不會靜靜退回預設值——用一個 typo 就能關掉保護
 而且沒有訊號，是這個模板最不能接受的失效方式。完整欄位見
 `docs/multi-language-support.md`。
+
+---
+
+### 想輕量一點：minimal 模式
+
+上面第 3 步那套 hook 覺得太重的話，可以只開第 1 層（實體隔離）：
+
+```json
+{ "protection": { "level": "minimal" } }
+```
+
+這樣就不需要 `.claude/settings.json` 的 hook，三支腳本（封存、執行、作廢）
+就跑得動，而「implementer 看不到隱藏測試」這件事仍然成立。
+代價是**公開測試被改不會有人抓到**，還有一條操作紀律：測試寫完立刻封存，
+不要留在暫存區過夜。完整的取捨表見 [`protection-levels.md`](protection-levels.md)。
+
+關掉的那幾層每一次都會被講出來（封存時、驗收時、每個 session），
+所以不會發生「以為四層都在、其實只有一層」。
+
+### 想讓驗收跑在 implementer 碰不到的地方：CI 驗收
+
+這個模板擋不住「決心繞過、而且跟 verifier 共用同一個 OS 使用者」的子智能體——
+那不是還沒修好的一項，是本機自我檢查的結構性終點。要跨過它，驗收得搬到
+GitHub Actions：
+
+```json
+{ "protection": { "ci_verification": true } }
+```
+
+設定步驟（密文包要 commit 進**預設分支**、權杖存成 repository secret、
+以及為什麼分支保護是必要而不是建議）見 [`ci-verification.md`](ci-verification.md)。
 
 ---
 
@@ -271,10 +303,12 @@ python3 scripts/test-guards.py && python3 scripts/test-locks.py \
   && python3 scripts/test-vault.py && python3 scripts/test-env-guard.py \
   && python3 scripts/test-config.py && python3 scripts/test-scan-json.py \
   && python3 scripts/test-timing.py && python3 scripts/test-skills.py \
-  && python3 scripts/test-attempts.py
+  && python3 scripts/test-attempts.py && python3 scripts/test-version.py \
+  && python3 scripts/test-design.py && python3 scripts/test-ci-verify.py \
+  && python3 scripts/test-protection-levels.py
 ```
 
-九組、290 個案例應該全數通過。這也是最快的「我裝完整了嗎」檢查。
+十三組、452 個案例應該全數通過。這也是最快的「我裝完整了嗎」檢查。
 
 ---
 

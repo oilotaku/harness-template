@@ -1,0 +1,84 @@
+# 第四輪 P0：把驗收搬出 implementer 的執行環境。
+#
+# 前三輪都在同一條軸線上加層——再簽一層章、再封一層存。那條軸線有結構性的終點：
+# 任何自我檢查都可以被「換掉檢查自己那一份」繞過，而繞過它的人跟驗收跑在同一個
+# OS 使用者底下。這個 workflow 換的是軸線：驗收跑在 GitHub Actions 上。
+#
+# 三件事決定了它的強度，缺一不可：
+#
+#   1. `pull_request_target`：GitHub 執行的是**預設分支**上的這個檔案，
+#      不是 PR 分支上的那一份。implementer 改自己分支上的 workflow 不影響驗收。
+#      （改成 `pull_request` 就整個垮掉——那會用 PR 分支上的 workflow。）
+#   2. 密文包與驗收腳本都取自 base checkout（同樣是預設分支）。
+#      PR 的程式碼只被當成「受測對象」，不提供任何一段會被執行的驗收邏輯。
+#   3. 權杖是 repository secret，而且**不會流進被測程式碼的環境變數**
+#      （由 scripts/ci-verify.py 的 scrub_env 負責，有回歸測試守著）。
+#
+# 這個設計的新信任根、以及它擋不掉什麼（誰能改預設分支、誰能讀 CI log、
+# 被測程式碼本來就跑得到明文），誠實寫在 docs/ci-verification.md，不在這裡重複。
+name: 隱藏測試驗收
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+# 預設最小權限。這個 job 不需要對 repo 做任何事，只需要讀。
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-hidden-tests-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: 隱藏測試驗收（權杖來自 repository secret）
+    # pull_request_target 對 **fork 的 PR** 一樣給得到 secret。沒有這一行，
+    # 任何人開一個 fork PR、在裡面放一支會 dump 環境的測試，就能把權杖帶走。
+    # fork 的 PR 一律不跑驗收——要驗收就在這個 repo 裡開分支。
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+
+    steps:
+      # 可信的那一份：預設分支的程式碼與密文包。驗收邏輯只從這裡來。
+      - name: Checkout 可信的基準分支
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+
+      # 受測的那一份：PR 分支。它會被執行，所以不給它 checkout 憑證——
+      # 帶著憑證的 .git/config 等於把一支可以對 repo 動手的 token 交給被測程式碼。
+      - name: Checkout 受測的 PR 分支
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: work
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: 驗收隱藏測試
+        env:
+          # 格式：每行一個 `<task_id> <權杖>`。設定位置在
+          # Settings → Secrets and variables → Actions。
+          HARNESS_VERIFY_TOKENS: ${{ secrets.HARNESS_VERIFY_TOKENS }}
+        run: |
+          python base/scripts/ci-verify.py \
+            --repo base \
+            --work-dir work \
+            --report-out report.enc
+
+      - name: 上傳加密的驗收明細
+        # 驗收失敗時更需要這份明細，所以 always()。
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hidden-test-report
+          # 只上傳加密明細。artifact 任何有 repo 讀取權的人都下載得到，
+          # 所以這裡不可以出現 work/ 或任何未加密的測試輸出。
+          path: report.enc
+          if-no-files-found: ignore
+          retention-days: 7

@@ -55,6 +55,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import shlex
 import sys
@@ -400,6 +401,51 @@ def verify_entry(entry: dict, token: str) -> bool:
     return hmac.compare_digest(expected, provided)
 
 
+# --------------------------------------------------------- 測試輸出的零測試偵測
+
+# 測試指令「一個測試都沒跑到」卻回傳 0 的常見輸出特徵。
+# 這件事在這套機制裡特別危險：驗收方會把 exit 0 讀成「隱藏測試全過」，
+# 於是一個什麼都沒驗到的實作就這樣通過驗收。實測觸發過的例子：
+# `unittest discover` 不會遞迴進沒有 __init__.py 的子目錄，檔案放巢狀就變成 Ran 0 tests。
+#
+# 放在這裡而不是 run-hidden-tests.py 裡面，是因為現在有**兩個**執行入口
+# （本機的 runner 與 CI 上的 ci-verify.py）。同一件事有兩份判準就會漂，
+# 而漂掉的那一份會安靜地把「零測試」讀成「通過」——這正是要擋的失效。
+ZERO_TEST_SIGNATURES = (
+    "ran 0 tests",  # unittest
+    "no tests ran",  # pytest
+    "collected 0 items",  # pytest
+    "no tests found",  # 多數 runner
+    "no test files",  # go test
+    "no test files found",  # vitest
+    "0 passing",  # mocha
+)
+
+# 從輸出裡估「跑了幾個測試」——只用來記進 baseline / 報告，解析不到就 None，不猜。
+TEST_COUNT_PATTERNS = (
+    re.compile(r"\bRan (\d+) tests?\b"),  # unittest
+    re.compile(r"\b(\d+) (?:passed|failed)\b"),  # pytest / vitest
+    re.compile(r"\b(\d+) (?:passing|failing)\b"),  # mocha
+)
+
+
+def looks_like_zero_tests(output: str) -> bool:
+    lowered = output.lower()
+    return any(signature in lowered for signature in ZERO_TEST_SIGNATURES)
+
+
+def count_tests_seen(output: str):
+    total = 0
+    matched = False
+    for pattern in TEST_COUNT_PATTERNS:
+        for found in pattern.findall(output):
+            total += int(found)
+            matched = True
+        if matched:
+            return total
+    return None
+
+
 # ------------------------------------------------------------------- 測試指令
 
 
@@ -416,6 +462,104 @@ def render_test_command(template: str, substitutions: dict) -> list:
             word = word.replace("{" + name + "}", str(substitutions[name]))
         argv.append(word)
     return argv
+
+
+# --------------------------------------------------------------- CI 驗收密文包
+
+# 第四輪 P0：把驗收搬出 implementer 的執行環境。
+#
+# 前三輪都在同一條軸線上：再簽一層章、再封一層存。那條軸線有一個結構性的終點——
+# 任何自我檢查都可以被「換掉檢查自己那一份」繞過，而繞過它的人跟驗收跑在
+# **同一個 OS 使用者**底下。第三輪的誠實記載已經把這件事寫出來了。
+#
+# 換軸的作法是：驗收改在 GitHub Actions 上跑。那是不同的機器、不同的使用者、
+# 沒有共用 transcript，而且 workflow 檔案來自**預設分支**（`pull_request_target`），
+# implementer 在自己的分支上改它不影響驗收。
+#
+# 為此需要把封存內容帶到 CI 上，所以有「密文包」：repo 內、會進版控的
+# `ci/sealed/<task_id>/`，裡面是密文與**簽過章的** manifest 項目。
+# implementer 讀得到（都是密文，沒有權杖解不開），改得動（但改了簽章就對不上）。
+# 權杖本身不在 repo 裡，它是 GitHub 的 repository secret。
+#
+# 這一層擋不掉什麼、以及它自己的新信任根（誰能改預設分支、誰能讀 CI log），
+# 誠實寫在 docs/ci-verification.md，不在這裡重複。
+
+CI_SEALED_DIR = harness_config.CI_SEALED_DIR
+CI_ENTRY_NAME = "entry.json"
+CI_REPORT_NAME = "report.enc"
+# 報告加密用的「相對路徑」。derive_key 把路徑混進金鑰，取一個不可能跟任何測試
+# 檔名相撞的名字，報告與測試檔就不會共用同一條 keystream。
+CI_REPORT_LABEL = "_ci_report"
+
+
+def ci_sealed_dir(root: Path = None) -> Path:
+    return (root or repo_root()) / CI_SEALED_DIR
+
+
+def ci_task_dir(root: Path, task_id: str) -> Path:
+    return ci_sealed_dir(root) / task_id
+
+
+def ci_sealed_tasks(root: Path = None) -> list:
+    """密文包裡有哪些 task_id（有 entry.json 的才算）。"""
+    base = ci_sealed_dir(root)
+    if not base.is_dir():
+        return []
+    return sorted(
+        path.name for path in base.iterdir()
+        if path.is_dir() and (path / CI_ENTRY_NAME).is_file()
+    )
+
+
+def encrypt_report(text: str, token: str) -> bytes:
+    """把驗收明細加密成只有握有權杖的一方讀得懂的東西。
+
+    為什麼要加密：CI 的 job log 與 artifact，**任何有 repo 讀取權的人都看得到**，
+    包含 implementer。失敗的測試名稱與 assert 訊息本身就是題目的一部分，
+    原樣印進 log 等於把隱藏測試變成可查詢的 oracle。所以 log 只留 exit code
+    與數量摘要，明細加密成 artifact，由握有權杖的 verifier-reviewer 解開。
+
+    前面接一段 HMAC：沒有權杖的人可以把 artifact 換掉，但換掉的內容解出來
+    會驗不過而被拒絕——讀的人得到的是「報告被動過」，不是一份假的報告。
+    """
+    body = text.encode("utf-8")
+    mac = hmac.new(mac_key(token), body, "sha256").hexdigest()
+    return transform(mac.encode("ascii") + b"\n" + body, token, CI_REPORT_LABEL)
+
+
+def decrypt_report(data: bytes, token: str) -> str:
+    """解開 encrypt_report 的產出。權杖不對或內容被動過時丟 ValueError。"""
+    plain = transform(data, token, CI_REPORT_LABEL)
+    mac, separator, body = plain.partition(b"\n")
+    if not separator or len(mac) != 64:
+        raise ValueError("報告解不開：權杖不對，或這個檔案不是 ci-verify.py 產生的報告。")
+    expected = hmac.new(mac_key(token), body, "sha256").hexdigest()
+    try:
+        provided = mac.decode("ascii")
+    except UnicodeDecodeError as exc:
+        raise ValueError("報告解不開：權杖不對。") from exc
+    if not hmac.compare_digest(expected, provided):
+        raise ValueError("報告的簽章不符：內容在產生之後被改過，不要當成驗收依據。")
+    return body.decode("utf-8", errors="replace")
+
+
+# ------------------------------------------------------- 保護等級（見 harness_config）
+
+
+def protection(root: Path = None) -> dict:
+    """這個專案開了幾層防護。設定壞掉時由呼叫端的 ConfigError 處理，不在這裡吞掉。"""
+    return harness_config.load(root or repo_root())["protection"]
+
+
+def is_minimal(root: Path = None) -> bool:
+    return protection(root)["level"] == "minimal"
+
+
+MINIMAL_NOTICE = (
+    "這個專案設成 protection.level = minimal：只有第 1 層（實體隔離）生效，"
+    "公開測試鎖定、事前攔截 hook、事後稽核都**沒有開**。"
+    "也就是說公開測試被改不會被抓到——見 docs/protection-levels.md。"
+)
 
 
 # ------------------------------------------------------------------- manifest

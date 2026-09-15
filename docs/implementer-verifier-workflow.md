@@ -46,6 +46,24 @@
                      （除非 verifier-reviewer 明確判定是測試本身設計錯誤）
 ```
 
+## 開了 CI 驗收之後，這張圖哪裡不一樣
+
+`harness.config.json` 的 `protection.ci_verification` 設成 `true` 時，
+步驟 2 與步驟 4 各多一段：
+
+- **步驟 2 之後**：封存會順手把密文包匯出到 `ci/sealed/<task_id>/`。
+  在「密文包 commit 進**預設分支**」與「權杖存進 repository secret」這兩件事
+  做完之前，**不要進入步驟 3**——CI 上的驗收會因為「沒東西可驗」而回傳成功，
+  那跟「全部通過」在 check 狀態上長得一模一樣。
+- **步驟 4**：正式驗收是 PR 上那個 check，不是 verifier-reviewer 在本機跑的那一跑。
+  本機那一跑降為「第二意見」；兩邊不一致要當成可疑訊號記進報告。
+  失敗明細在加密的 artifact 裡，用 `scripts/read-ci-report.py` 加權杖解開，
+  **不可以**原樣貼進驗收報告。
+
+為什麼要多這一段：步驟 4 的所有保護在本機都有同一個上限——驗收與被驗收跑在
+同一個 OS 使用者底下。CI 上那一跑沒有這個前提。完整說明與它自己的信任根見
+[`ci-verification.md`](ci-verification.md)。
+
 ## 「先寫測試防止作弊」的具體機制
 
 1. **時間序保證**：測試先於實作存在，實作者無法回頭修改測試來遷就自己的程式碼。
@@ -91,8 +109,8 @@
    > 相依模組會 exit 2。事前層（guard 擋強制力本體的寫入）是額外的一道，不是主防線。
    >
    > 仍然不擋：換掉封存版的 `run-hidden-tests.py` **自己**、而且把自我比對拿掉——
-   > 任何自我檢查都有這個循環。細節見
-   > `docs/history/improvement-suggestions-round3.md` 的 P0-8。
+   > 任何自我檢查都有這個循環。第四輪把它承接到 CI 驗收，見
+   > `docs/ci-verification.md`（第三輪當時的 P0-8 記錄在歷史，見 `docs/history/README.md`）。
 4. **獨立驗證鏈**：`verifier-reviewer` 與 `implementer-*` 是不同 session，
    不共用上下文，驗收時是「從零重新審視」而不是延續實作者的思路
    （對應 SE-CoVe 獨立驗證鏈的精神）。

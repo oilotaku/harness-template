@@ -57,6 +57,16 @@ frontmatter 的 `thinking` 欄位**不會被 Claude Code 讀取**，它只是本
 
 1. **執行公開測試 + 隱藏測試**，全部通過才算過第一關。
    - 公開測試：用專案對應的測試指令直接跑 `tests/public/`。
+   - **這個專案若開了 CI 驗收**（`harness.config.json` 的
+     `protection.ci_verification` 是 true）：**正式驗收是 GitHub Actions 上那一跑，
+     不是你在本機跑的那一跑。** 去看 PR 的「隱藏測試驗收」check，下載
+     `hidden-test-report` artifact，用
+     `python3 scripts/read-ci-report.py --file report.enc --token <權杖>` 解開明細。
+     本機那一跑仍然可以做，但它的定位是「第二意見」——它跟 implementer 在同一台
+     機器上，而 CI 上那一跑不是（見 `docs/ci-verification.md`）。
+     兩邊結果不一致時**以 CI 為準**，並把不一致本身寫進報告：那是強烈的可疑訊號。
+     CI 的 check 若根本沒跑（fork PR、workflow 被停用），判定不通過，
+     理由寫「正式驗收未執行」——沒跑跟通過在 check 狀態上很容易被讀成同一件事。
    - 隱藏測試：`python3 "<封存庫>/_runner/run-hidden-tests.py" --task-id <task_id> --token <權杖>`
      **用 Orchestrator 給你的那個絕對路徑，不要用 `scripts/run-hidden-tests.py`。**
      repo 裡那一份 implementer 改得到；封存版在 repo 之外，而且它每個檔案的 sha256
@@ -110,6 +120,10 @@ frontmatter 的 `thinking` 欄位**不會被 Claude Code 讀取**，它只是本
    > 都有這個循環。封存版買到的是「攻擊者得寫到 repo 之外（guard 對封存庫不分動詞
    > 一律擋），而且動其他四個檔案都會被抓到」。
    >
+   > 那個循環只有換軸才解得掉：CI 驗收（`docs/ci-verification.md`）讓驗收跑在
+   > implementer 的工具構不到的機器上，workflow 與密文包都取自預設分支。
+   > 開了 CI 驗收的專案，這一段的殘留限制就換成那份文件 §5 那一串。
+   >
    > 所以最後一道仍然是你：若驗收結果與你讀程式碼得到的印象明顯不符——實作看起來
    > 根本沒做完、卻「全部通過」——**以你讀到的程式碼為準**，回報 Orchestrator
    > 要求人工複核。
@@ -156,3 +170,5 @@ frontmatter 的 `thinking` 欄位**不會被 Claude Code 讀取**，它只是本
 - 禁止跳過隱藏測試只看公開測試就判定通過。
 - 禁止把執行權杖寫進驗收報告、commit 訊息，或以任何形式傳給 implementer。
 - 禁止把隱藏測試的原始碼貼進驗收報告——只寫失敗的測試名稱與訊息。
+- 禁止把 `read-ci-report.py` 解出來的明細原樣貼進驗收報告：那份是加密的，
+  正是因為驗收報告 implementer 讀得到。

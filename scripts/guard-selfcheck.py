@@ -183,6 +183,85 @@ def check_config() -> bool:
     return True
 
 
+def _protection() -> dict:
+    """這個專案宣告了幾層防護。設定壞掉時由 check_config() 負責報錯，
+    這裡退回 full——把壞掉的設定當成 minimal 會讓警告消失，正好是反過來的。"""
+    try:
+        return harness_config.load(REPO_ROOT)["protection"]
+    except harness_config.ConfigError:
+        return {"level": harness_config.DEFAULT_PROTECTION_LEVEL, "ci_verification": False}
+
+
+def _stale_ci_bundles(base: Path, sealed) -> list:
+    """密文包裡的簽章與 manifest 目前那一筆不同的 task。
+
+    比的是簽章而不是內容：簽章涵蓋整個項目，只要有任何一個欄位被重新簽過
+    （基線執行、嘗試次數累加）就會不同。讀不到就當它沒問題——這是提醒，
+    不是判定，在這裡 fail-closed 只會製造雜訊。
+    """
+    try:
+        manifest = json.loads(HIDDEN_MANIFEST.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    tasks = manifest.get("tasks") or {}
+
+    stale = []
+    for task_id in sealed:
+        current = tasks.get(task_id)
+        if not isinstance(current, dict) or not current.get("signature"):
+            continue
+        try:
+            payload = json.loads((base / task_id / "entry.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        exported = (payload or {}).get("entry") or {}
+        if exported.get("signature") != current["signature"]:
+            stale.append(task_id)
+    return stale
+
+
+def check_protection(protection: dict) -> None:
+    """把「這個專案開了幾層」每個 session 講一次（第四輪 P1）。
+
+    minimal 模式最大的風險不是少了三層，是**沒有人記得少了三層**。
+    所以它不是靜靜少跑幾個檢查：每個 session、每次封存、每次驗收都會講。
+    """
+    if protection["level"] == "minimal":
+        print("保護等級：**minimal**（只有第 1 層：實體隔離）")
+        print("  沒有開的三層：事前攔截 hook、公開測試鎖定與事後稽核、本檢查的探測。")
+        print("  代價：公開測試在封存後被改不會有人抓到。見 docs/protection-levels.md。")
+    else:
+        print("保護等級：full（四層）")
+
+    if not protection["ci_verification"]:
+        return
+
+    sealed = []
+    base = REPO_ROOT / harness_config.CI_SEALED_DIR
+    if base.is_dir():
+        sealed = sorted(
+            path.name for path in base.iterdir()
+            if path.is_dir() and (path / "entry.json").is_file()
+        )
+    if sealed:
+        print(f"CI 驗收：已宣告，{harness_config.CI_SEALED_DIR}/ 有 {len(sealed)} 個密文包"
+              f"（{'、'.join(sealed)}）")
+        for task_id in _stale_ci_bundles(base, sealed):
+            # 最常見的成因：封存後做了基線執行（那會改寫簽過章的項目），
+            # 但沒有重新匯出。後果不是驗收出錯，是 CI 上永遠說「沒有基線紀錄」——
+            # 一個永遠出現的警告等於沒有警告，所以在這裡先抓出來。
+            print(f"⚠️ 密文包「{task_id}」比 manifest 舊（多半是基線執行之後沒有重新匯出）。")
+            print("   重匯：python3 scripts/export-sealed-task.py --task-id "
+                  f"{task_id} --token <權杖>")
+        return
+    # 宣告了要用 CI 驗收、卻沒有密文包，是會讓驗收「安靜地沒有跑」的那種漂移：
+    # workflow 會發現沒東西可驗而回 0，看起來跟「全部通過」一模一樣。
+    print(f"⚠️ 宣告了 CI 驗收（protection.ci_verification = true），"
+          f"但 {harness_config.CI_SEALED_DIR}/ 裡沒有任何密文包。")
+    print("   CI 上的驗收會因為「沒東西可驗」而回傳成功——那跟「全部通過」長得一樣。")
+    print("   封存後請執行 `python3 scripts/export-sealed-task.py` 並 commit 進預設分支。")
+
+
 def check_gitignore() -> None:
     """每個隱藏測試暫存區都必須被 .gitignore 排除（第二輪 P1-7）。
 
@@ -517,6 +596,25 @@ def main() -> int:
     args = parser.parse_args()
 
     print("===== 防作弊機制自我檢查（SessionStart）=====")
+
+    protection = _protection()
+    minimal = protection["level"] == "minimal"
+
+    # 等級要在任何檢查之前講。「guard 不見了」與「這個專案本來就只開一層」
+    # 是兩件事，同時發生時更要兩句話都看得到。
+    check_protection(protection)
+
+    if minimal:
+        # minimal 沒有裝 hook，探測一定會全失敗。照跑只會每個 session 印一整片
+        # 紅字，而「習慣忽略警告」比少一層保護更難修。所以這裡改成講清楚缺什麼。
+        config_ok = check_config()
+        check_gitignore()
+        check_unprotected_hidden_dirs()
+        check_vault_state()
+        check_version()
+        check_design()
+        print("===== 結束 =====")
+        return 1 if (args.strict and not config_ok) else 0
 
     if not GUARD.exists():
         print(f"⚠️ 找不到 {GUARD}——隱藏測試防護目前**完全沒有生效**。")

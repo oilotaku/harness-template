@@ -187,8 +187,20 @@ ARCHIVE_DIR = "releases"
 #
 # 比照版本檔：**只擋寫入、不擋讀取**——讀 harness 的程式碼是正當用途
 # （implementer 可能需要知道測試怎麼被執行），改它不是。
-HARNESS_SOURCE_PREFIXES = ("scripts", ".claude")
+#
+# 第四輪 P0 補上 `.github`：驗收改在 CI 上跑之後，workflow 檔案就是強制力的一部分。
+# 正式驗收讀的是**預設分支**的那一份（`pull_request_target`），所以 implementer
+# 在自己分支上改它本來就不影響結果——但沒有理由讓他改，而擋下來的訊息會直接
+# 告訴他這條路不通，比讓他改完、推上去、發現沒用要清楚得多。
+HARNESS_SOURCE_PREFIXES = ("scripts", ".claude", ".github")
 HARNESS_SOURCE_FILES = ("CLAUDE.md", "harness.config.json")
+
+# CI 驗收用的密文包（第四輪 P0）。內容是密文與簽過章的 manifest 項目：
+# **只擋寫入、不擋讀取**——讀它拿到的是密文，沒有權杖解不開；改它會讓簽章對不上，
+# 但那要等到 CI 上才會發現，不如在這裡就講清楚。
+CI_SEALED_DIR = "ci/sealed"
+if harness_config is not None:
+    CI_SEALED_DIR = harness_config.CI_SEALED_DIR
 
 if harness_config is not None:
     try:
@@ -444,6 +456,13 @@ def _is_archive_path(rel) -> bool:
     return target == ARCHIVE_DIR or target.startswith(ARCHIVE_DIR + "/")
 
 
+def _is_ci_sealed_path(rel) -> bool:
+    if not rel or not CI_SEALED_DIR:
+        return False
+    target = rel.rstrip("/")
+    return target == CI_SEALED_DIR or target.startswith(CI_SEALED_DIR + "/")
+
+
 def _is_harness_source_path(rel) -> bool:
     """強制力本體：runner／簽章／稽核／guard／hook 設定／受保護路徑的定義／
     檢驗者的行為準則。只在封存過 task 之後生效（見 _harness_source_protected）。"""
@@ -467,6 +486,7 @@ def _is_protected_write_target(rel, locked: set) -> bool:
         or _is_version_file(rel)
         or _is_archive_path(rel)
         or _is_harness_source_path(rel)
+        or _is_ci_sealed_path(rel)
     ):
         return True
     return rel.rstrip("/") in locked
@@ -513,6 +533,14 @@ def _check_file_path(raw_path: str, locked: set, tool_name: str = None):
             f"拒絕：「{target}」是這個專案的版本檔，屬於治理資訊，實作者不可修改。"
             "版本號由 Orchestrator 用 `python3 scripts/version.py --bump <層級>` 更新"
             "（讀它沒有問題，只有寫入被擋）。"
+        )
+
+    if _is_ci_sealed_path(target):
+        return (
+            f"拒絕：「{target}」是 CI 驗收用的密文包（隱藏測試的密文 + 簽過章的 manifest 項目）。"
+            "讀它沒有問題——沒有權杖解不開；改它沒有用——簽章由權杖推導，"
+            "改了只會讓 CI 上的驗收判定為「密文包被動過」，跟簽章不符同一級。"
+            "它由 `python3 scripts/export-sealed-task.py` 產生，見 docs/ci-verification.md。"
         )
 
     if _is_harness_source_path(target):
