@@ -103,12 +103,31 @@ argv，而 `verify-locks.py` 與 `guard-selfcheck.py --strict` 都回報正常�
 以及每個 session 的自我檢查都會清掉並出聲。這是事後補救，不是預防——
 從被砍到下一次執行之間，明文確實還在。
 
-## 快速開始
+## 60 秒 quickstart
+
+只想先跑起來、別讀一長串說明的話，兩步：
+
+```bash
+git clone <repo-url> && cd <你的專案>       # 或把 harness-template/ 內容複製進去
+python3 scripts/setup.py                     # 設定精靈：偵測語言、產生設定、建版本號
+```
+
+`setup.py` 會偵測你的語言（Python / Node / Go / Rust）、問兩個真正需要你決定的
+問題（保護等級、要不要 CI 驗收），產生 `harness.config.json`，最後**印出你的
+下一個指令**——照著貼上就能跑通第一次 seal→verify。不想被問，加 `--yes` 全用預設。
+
+想先看它整套跑一次而不動到你的專案：`templates/examples/demo-fizzbuzz/`。
+
+太重？`python3 scripts/setup.py --level minimal` 只開第 1 層（實體隔離），
+不必裝任何 hook（見 [`docs/protection-levels.md`](docs/protection-levels.md)）。
+
+## 快速開始（逐步）
 
 > **完全從零開始**（還沒裝 Python / Claude Code、或要套用到既有專案）請看
 > **[`docs/getting-started.md`](docs/getting-started.md)**——那份文件每一步都附
 > 「怎麼確認這一步成功了」，因為這個模板最大的風險是**看起來裝好了、
-> 但保護其實沒生效**。下面這段假設你已經有可用的環境。
+> 但保護其實沒生效**。下面這段假設你已經有可用的環境，而且想手動走過每一步
+> （不想手動的話用上面的 `setup.py`）。
 
 1. `git clone` 這個 repo（或把 `harness-template/` 內容複製到你的專案根目錄）。
 
@@ -129,10 +148,10 @@ argv，而 `verify-locks.py` 與 `guard-selfcheck.py --strict` 都回報正常�
    散文裡自己換算。換了機器且確認過是刻意更換，用
    `python3 scripts/env-guard.py --update` 把目前環境設為新的基準指紋。
 
-3. **非 Python 專案**：在專案根目錄建立 `harness.config.json`，指定你的測試目錄
-   與測試指令。不設定的話防作弊機制會找不到你的測試，等於完全沒有保護
-   （`guard-selfcheck.py` 會在 session 開始時警告你）。範例見
-   `docs/multi-language-support.md`。
+3. **非 Python 專案**：需要 `harness.config.json` 指定你的測試目錄與測試指令，
+   否則防作弊機制找不到你的測試、等於完全沒有保護（`guard-selfcheck.py` 會在
+   session 開始時警告你）。**最省事的方式是 `python3 scripts/setup.py`**——它會
+   依語言自動填好；要手寫的話範例見 `docs/multi-language-support.md`。
 
 4. **建立版本號**（`guard-selfcheck.py` 會在 session 開始時提醒你還沒有）：
 
@@ -270,10 +289,10 @@ python3 scripts/test-guards.py && python3 scripts/test-locks.py \
   && python3 scripts/test-timing.py && python3 scripts/test-skills.py \
   && python3 scripts/test-attempts.py && python3 scripts/test-version.py \
   && python3 scripts/test-design.py && python3 scripts/test-ci-verify.py \
-  && python3 scripts/test-protection-levels.py
+  && python3 scripts/test-protection-levels.py && python3 scripts/test-setup.py
 ```
 
-這十三組（共 **452 個案例**）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
+這十四組（共 **466 個案例**）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
 六種組合上自動執行，Linux 另外多跑一輪 `LC_ALL=C`（非 UTF-8 locale）
 （見 `.github/workflows/ci.yml`）。
 
