@@ -95,7 +95,8 @@ argv，而 `verify-locks.py` 與 `guard-selfcheck.py --strict` 都回報正常�
 而且換掉的版本把自我比對整段拿掉，就沒有人會執行那段檢查——任何自我檢查都有這個
 循環。封存版買到的是「攻擊者得寫到 repo 之外（guard 對封存庫不分動詞一律擋），
 而且動其他四個檔案都會被抓到」。要完全消除需要獨立的使用者或容器，超出本模板範圍。
-細節見 `docs/history/improvement-suggestions-round3.md` 的 P0-8。
+細節見 `docs/ci-verification.md`（第四輪把這個循環的殘留限制承接過去）；
+第三輪當時的實測記錄在歷史裡的 round3 報告 P0-8（取得方式見 `docs/history/README.md`）。
 
 明文解在**封存庫底下**而不是 `/tmp`，所以萬一行程被強制中斷（撞到用量上限、
 容器被回收）沒清乾淨，殘留至少落在 guard 擋得住的路徑裡；下一次執行、`--sweep`、
@@ -317,16 +318,11 @@ session 各自重載 `CLAUDE.md` 與自己的定義檔。那是「獨立驗證�
 **SE-CoVe（獨立驗證鏈，Meta AI, ACL 2024）**概念，將「產生答案」與「驗證答案」
 拆成兩條完全獨立的鏈路。
 
-`docs/history/improvement-suggestions.md` 是這個模板的一份完整審視報告（18 項，全部結案），
-記錄了每一項的問題、修法、以及**實際落地時偏離原始草案的地方與理由**。
-它只給人看——那份文件比其他所有 `docs/` 加起來還大，不要放進任何子智能體的
-閱讀路徑（見 `docs/token-strategy.md` §1）。
-第二輪審視 `docs/history/improvement-suggestions-round2.md`（同樣只給人看）針對第一輪
-引入的新信任根——manifest、鎖定清單、keystream——做了實測，並列出尚未處理的項目。
-第三輪審視 `docs/history/improvement-suggestions-round3.md`（同樣只給人看）問了下一個問題：
-簽章保護的是 runner 信任的**資料**，那 **runner 自己**是誰寫的？結論是強制力的程式碼
-本身 implementer 改得到。這一輪的八項都已落地——根本解是把驗收用的程式碼一起封存、
-由封存版執行。
+這個模板做過四輪對抗式審視，每一輪都問「上一輪的保證靠什麼成立」。四份完整報告
+（約 114 KB，只給人看）**已移出主線**——留在 `docs/` 裡只會讓每個 clone 的人多一份
+不會讀的推理過程，還會變成一份逐漸跟程式碼脫節的活文件（這正是 `docs/token-strategy.md`
+§1 那條規則的最終應用）。200 字的決策摘要與「完整報告怎麼從 git 歷史取回」在
+`docs/history/README.md`。
 
 第四輪的結論是**這條軸線該停了**：第三輪自己記下的那個循環（「換掉檢查自己那一份」
 就沒有人會執行那段檢查）不是還沒修好的一項，是自我檢查的結構性終點。
@@ -335,7 +331,3 @@ session 各自重載 `CLAUDE.md` 與自己的定義檔。那是「獨立驗證�
 並把「四層全開或整套不用」拆成可選的保護等級
 （[`docs/protection-levels.md`](docs/protection-levels.md)）。
 殘留限制與新的信任根都寫在那兩份文件裡，一樣沒有粉飾。
-
-四輪審視報告的**決策摘要**（每輪問了什麼、結論是什麼）在
-[`docs/history/README.md`](docs/history/README.md)；完整報告很長，
-而且只給人看——不要放進任何子智能體的閱讀路徑（見 `docs/token-strategy.md` §1）。

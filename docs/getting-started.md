@@ -77,8 +77,9 @@ CLAUDE.md          .claude/          scripts/          docs/          templates/
    guard 從第三輪起也會擋同一組路徑，但**只在這個 repo 封存過 task 之後**
    （否則維護 harness 本身的人會被自己的 hook 擋住）。這組 deny 是第二層，
    兩層都只是縱深防禦：拿得到 Bash 的子智能體寫一支腳本去改仍然穿得過去。
-   根本解是不要執行 repo 裡的程式碼，見
-   `docs/history/improvement-suggestions-round3.md` 的 P0-8 (a)。
+   根本解是不要執行 repo 裡的程式碼——第三輪封存驗收程式碼（P0-8 (a)，記錄在
+   git 歷史，見 `docs/history/README.md`），第四輪更進一步把驗收搬到 CI
+   （見 `docs/ci-verification.md`）。
 
    > 模板自己的 repo **刻意沒有**這組 deny——它就是模板本身，`scripts/` 是它的
    > 產品程式碼。你的專案不是這種情況，請加上。

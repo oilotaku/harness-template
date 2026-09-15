@@ -109,8 +109,8 @@
    > 相依模組會 exit 2。事前層（guard 擋強制力本體的寫入）是額外的一道，不是主防線。
    >
    > 仍然不擋：換掉封存版的 `run-hidden-tests.py` **自己**、而且把自我比對拿掉——
-   > 任何自我檢查都有這個循環。細節見
-   > `docs/history/improvement-suggestions-round3.md` 的 P0-8。
+   > 任何自我檢查都有這個循環。第四輪把它承接到 CI 驗收，見
+   > `docs/ci-verification.md`（第三輪當時的 P0-8 記錄在歷史，見 `docs/history/README.md`）。
 4. **獨立驗證鏈**：`verifier-reviewer` 與 `implementer-*` 是不同 session，
    不共用上下文，驗收時是「從零重新審視」而不是延續實作者的思路
    （對應 SE-CoVe 獨立驗證鏈的精神）。
