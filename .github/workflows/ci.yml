@@ -89,6 +89,9 @@ jobs:
       - name: 保護等級回歸測試（minimal 真的少跑三層，而且每次都講出來）
         run: python scripts/test-protection-levels.py
 
+      - name: 設定精靈回歸測試（偵測語言、產生的設定一定通過驗證、不靜默覆蓋）
+        run: python scripts/test-setup.py
+
       - name: 模板自己附的設計 token 必須達 WCAG AA
         run: python scripts/check-design-tokens.py
 
@@ -112,6 +115,7 @@ jobs:
           python -X utf8=0 scripts/test-design.py
           python -X utf8=0 scripts/test-ci-verify.py
           python -X utf8=0 scripts/test-protection-levels.py
+          python -X utf8=0 scripts/test-setup.py
 
       - name: 範例流程仍可重跑
         working-directory: templates/examples/demo-fizzbuzz

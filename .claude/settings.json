@@ -2,6 +2,9 @@
   "$comment": "範例設定：實際欄位請依你使用的 Claude Code 版本文件調整。deny 清單是意圖宣示與第一層過濾，不是完整防護（rm -fr、小寫 drop table 等變形不會命中），真正的破壞性操作防護仍要靠 permission mode 與人工核准。第三輪 P0-8：把 harness 套進**你自己的專案**時，建議再加上 Write/Edit 形式的 deny（見 docs/getting-started.md），擋掉 implementer 改寫強制力本體。這個 repo 自己刻意不加——它就是模板本身，scripts/ 是它的產品程式碼；改由 guard 在「封存過 task 之後」動態保護，見 scripts/guard-hidden-tests.py 的 _harness_source_protected()。",
   "permissions": {
     "allow": [
+      "Bash(python3 scripts/setup.py)",
+      "Bash(python3 scripts/setup.py:*)",
+      "Bash(python3 scripts/test-setup.py)",
       "Bash(python3 scripts/init.py)",
       "Bash(python3 scripts/init.py:*)",
       "Bash(python3 scripts/machine-profile.py)",
