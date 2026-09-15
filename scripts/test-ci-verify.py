@@ -351,7 +351,10 @@ def _(tmp: Path):
     assert token not in env.values(), "權杖流進了被測程式碼的環境變數"
     for name in ("HARNESS_VERIFY_TOKENS", "HARNESS_VERIFY_TOKEN", "GITHUB_TOKEN"):
         assert name not in env, f"{name} 流進了被測程式碼的環境變數"
-    assert env.get("HARNESS_REPO_ROOT") == str(repo), env.get("HARNESS_REPO_ROOT")
+    # 比對要用 resolve() 後的路徑：ci-verify.py 內部對 --work-dir 做了 .resolve()，
+    # 而 Windows 的 %TEMP% 常是 8.3 短路徑（RUNNER~1），resolve 之後才是長格式。
+    # 不 resolve 兩邊就會在 Windows 上假失敗——本機 Linux 剛好一致所以看不出來。
+    assert env.get("HARNESS_REPO_ROOT") == str(repo.resolve()), env.get("HARNESS_REPO_ROOT")
 
 
 @case("受測程式碼是 --work-dir 那一份，不是密文包所在的那一份")
@@ -368,7 +371,8 @@ def _(tmp: Path):
     assert result.returncode == 0, result.stdout + result.stderr
 
     env = json.loads((work / "env.json").read_text(encoding="utf-8"))
-    assert env["HARNESS_REPO_ROOT"] == str(work), env["HARNESS_REPO_ROOT"]
+    # 同上：ci-verify.py resolve 過 --work-dir，Windows 的短路徑不 resolve 會對不上。
+    assert env["HARNESS_REPO_ROOT"] == str(work.resolve()), env["HARNESS_REPO_ROOT"]
     assert not (repo / "env.json").exists(), "測試跑在可信的那份 checkout 底下"
 
 
