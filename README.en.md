@@ -76,6 +76,19 @@ change the default branch, who can read the CI log, and that the code under test
 can reach the plaintext by nature) — are in
 [`docs/ci-verification.en.md`](docs/ci-verification.en.md), with no whitewashing.
 
+**Also does not block** (a second honest limit): when the implementer and the
+verifier are the **same underlying model**, their errors are correlated.
+Separating sessions removes "cross-contamination," not "shared priors" — given an
+ambiguous spec, one model is likely to misread it the same way on both sides, so
+the tests and the implementation are **wrong together** and everything goes
+green. Hidden tests stop "knowing the spec yet cutting corners"; they cannot stop
+"both sides genuinely misunderstanding the spec." What reduces it: writing the
+task-spec so it has only one reading, assigning the implementer and verifier
+different models where possible, and adding a human spec review for ambiguous or
+high-risk tasks — see the "correlated misunderstanding" section of
+[`docs/implementer-verifier-workflow.md`](docs/implementer-verifier-workflow.md)
+(Chinese).
+
 **Strength is optional**: four layers are all on by default (`full`), but if you
 only want "the implementer cannot see the hidden tests," `minimal` runs with
 three scripts and three lines of config, and each layer you turned off gets said

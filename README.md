@@ -51,6 +51,14 @@ OS 使用者**的子智能體。權杖會經過 Claude Code 的 transcript；解
 誰讀得到 CI log、被測程式碼本來就跑得到明文），見
 [`docs/ci-verification.md`](docs/ci-verification.md)——一樣沒有粉飾。
 
+**也擋不住的**（另一個誠實限制）：當 implementer 與 verifier 是**同一個底層模型**時，
+他們的錯誤是相關的。分離 session 換掉「互相污染」，換不掉「共有先驗」——一段有歧義的
+規格，同一個模型很可能兩邊朝同一個方向誤讀，於是測試與實作**一起錯**而全部綠燈。
+隱藏測試防的是「明知規格卻取巧」，防不了「雙方都真心誤解規格」。降低它的是
+task-spec 寫到只有一種讀法、implementer 與 verifier 盡量用不同模型、以及對模糊或
+高風險任務加一道人類複審規格，見
+[`docs/implementer-verifier-workflow.md`](docs/implementer-verifier-workflow.md) 的「相關性誤解」一節。
+
 **強度是可選的**：預設四層全開（`full`），但只想要「隱藏測試 implementer 看不到」
 這件事的話，`minimal` 用三支腳本與三行設定就跑得動，關掉的那幾層每一次都會被
 講出來。見 [`docs/protection-levels.md`](docs/protection-levels.md)。
