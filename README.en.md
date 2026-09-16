@@ -48,6 +48,17 @@ leak. After sealing, hidden tests are not in the working tree, their contents
 are ciphertext, and decryption needs a token handed only to the verifier. This
 layer is hard, and it relies on nobody's self-discipline.
 
+**What grade of "encryption" this is** (so you don't misuse it): sealing uses a
+SHA-256 keystream XOR (a separate key per file) implemented with the Python
+standard library only — **not AES**. Its threat model is exactly the above —
+stopping unintentional leaks — so it is **misread-prevention grade, not
+confidentiality grade**. Do **not** put genuinely sensitive things (credentials,
+personal data, keys, trade secrets) in hidden tests: that kind of data belongs in
+OS permissions or dedicated secret management, not this vault. For the design
+trade-offs (why not AES, how the two-time-pad is avoided) see
+[`docs/ci-verification.md`](docs/ci-verification.md) §1 and the module docstring
+of `scripts/hidden_vault.py`.
+
 **What it does not block** (the default local setup): a sub-agent that is
 **determined to bypass and shares the same OS user as the verifier**. The token
 passes through Claude Code's transcript; the decrypted plaintext exists on disk
@@ -64,6 +75,19 @@ and **this approach's own new roots of trust and residual limits** (who can
 change the default branch, who can read the CI log, and that the code under test
 can reach the plaintext by nature) — are in
 [`docs/ci-verification.en.md`](docs/ci-verification.en.md), with no whitewashing.
+
+**Also does not block** (a second honest limit): when the implementer and the
+verifier are the **same underlying model**, their errors are correlated.
+Separating sessions removes "cross-contamination," not "shared priors" — given an
+ambiguous spec, one model is likely to misread it the same way on both sides, so
+the tests and the implementation are **wrong together** and everything goes
+green. Hidden tests stop "knowing the spec yet cutting corners"; they cannot stop
+"both sides genuinely misunderstanding the spec." What reduces it: writing the
+task-spec so it has only one reading, assigning the implementer and verifier
+different models where possible, and adding a human spec review for ambiguous or
+high-risk tasks — see the "correlated misunderstanding" section of
+[`docs/implementer-verifier-workflow.md`](docs/implementer-verifier-workflow.md)
+(Chinese).
 
 **Strength is optional**: four layers are all on by default (`full`), but if you
 only want "the implementer cannot see the hidden tests," `minimal` runs with

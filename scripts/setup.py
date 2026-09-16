@@ -10,7 +10,7 @@
 這支腳本把「入門」這件事變成一個指令：
 
   1. 偵測專案語言（Python / Node / Go / Rust），據此填測試路徑與測試指令
-  2. 問兩個真正需要人決定的問題（保護等級、要不要 CI 驗收），其餘給安全預設
+  2. 問幾個真正需要人決定的問題（保護等級、CI 驗收、有無圖形介面、releases 歸檔），其餘給安全預設
   3. 產生 harness.config.json（**絕不覆蓋既有的**，除非 --force）
   4. 建立版本號（呼叫 version.py --init）
   5. 印出「你的下一個指令」——照順序，複製貼上就能跑通第一次 seal→verify
@@ -138,14 +138,20 @@ def ask(prompt: str, default: str, choices=None, interactive=True) -> str:
     return answer
 
 
-def build_config(lang: str, level: str, ci: bool, design_gui: bool) -> dict:
+def build_config(lang: str, level: str, ci: bool, design_gui: bool, archive: bool) -> dict:
     profile = LANG_PROFILES[lang]
+    # 複製 version：profile["version"] 是 LANG_PROFILES 裡的共用 dict，
+    # 直接塞 archive 會污染模組層級的設定（下一次呼叫就帶著上一次的選擇）。
+    version = dict(profile["version"])
+    if not archive:
+        # 只有「關掉」需要寫出來——省略等於預設開啟（見 docs/versioning.md §4.5）。
+        version["archive"] = False
     config = {
         "$comment": "由 scripts/setup.py 產生。可以手改；改完直接跑任何一支腳本，設定壞掉會 fail-closed 報錯（見 docs/multi-language-support.md）。",
         "public_test_paths": profile["public"],
         "hidden_test_paths": profile["hidden"],
         "hidden_test_command": profile["command"],
-        "version": profile["version"],
+        "version": version,
         "protection": {"level": level, "ci_verification": ci},
     }
     if not design_gui:
@@ -230,8 +236,10 @@ def main() -> int:
     parser.add_argument("--ci", dest="ci", action="store_true", help="開啟 CI 驗收（protection.ci_verification）")
     parser.add_argument("--gui", dest="gui", action="store_true", help="這個專案有圖形介面（保留設計 token 檢查）")
     parser.add_argument("--no-gui", dest="gui", action="store_false", help="這個專案沒有圖形介面（關掉設計 token 檢查）")
+    parser.add_argument("--archive", dest="archive", action="store_true", help="升版時把原始碼另存一份到 releases/（預設）")
+    parser.add_argument("--no-archive", dest="archive", action="store_false", help="不做 releases/ 歸檔（避免 repo 隨版本膨脹）")
     parser.add_argument("--force", action="store_true", help="覆蓋既有的 harness.config.json")
-    parser.set_defaults(gui=None, ci=None)
+    parser.set_defaults(gui=None, ci=None, archive=None)
     args = parser.parse_args()
 
     root = harness_config.repo_root()
@@ -304,8 +312,18 @@ def main() -> int:
                       "n", choices=["y", "n"], interactive=interactive)
         design_gui = gui_ans == "y"
 
-    # 5. 產生設定，並**一定先驗過**再落地
-    config = build_config(lang, level, ci, design_gui)
+    # 5. releases 歸檔（預設開；問一次而不是靜默套用——git tag 已能取到任一版，
+    #    但每升一版複製一份原始碼會讓 repo 線性膨脹，值不值得由使用者決定，見 docs/versioning.md §4.5）
+    if args.archive is not None:
+        archive = args.archive
+        print(f"releases/ 歸檔（你指定）：{'開' if archive else '關'}")
+    else:
+        archive_ans = ask("每次升版要不要把原始碼另存一份到 releases/？（不會用 git 也能拿到某一版；關掉可避免 repo 隨版本膨脹）",
+                          "y", choices=["y", "n"], interactive=interactive)
+        archive = archive_ans == "y"
+
+    # 6. 產生設定，並**一定先驗過**再落地
+    config = build_config(lang, level, ci, design_gui, archive)
     write_config(root, config)
     try:
         harness_config.load(root)
@@ -322,13 +340,14 @@ def main() -> int:
     print(f"   測試指令：{config['hidden_test_command']}")
     print(f"   保護等級：{level}（CI 驗收：{'開' if ci else '關'}）")
     print(f"   設計 token 檢查：{'開（未確認）' if design_gui else '關'}")
+    print(f"   releases/ 歸檔：{'開（每次升版另存原始碼）' if archive else '關（只靠 git 版本歷史）'}")
 
-    # 6. 版本號
+    # 7. 版本號
     print()
     print(">>> 建立版本號（version.py --init）")
     init_version(root)
 
-    # 7. 下一步
+    # 8. 下一步
     print_next_steps(config, lang)
     print()
     print("===== 結束 =====")

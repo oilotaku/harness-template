@@ -28,6 +28,26 @@ different user, no shared transcript, and the workflow file comes from the
 default branch — this time, the "swap out the copy that checks itself" move
 doesn't exist from the start.
 
+## 1.5 When to turn it on (and when it isn't optional)
+
+`ci_verification` defaults to `false` because it needs GitHub, someone to commit
+the sealed bundle into the default branch, and the token stored as a secret — an
+overhead that's pointless for "one machine, the implementer is not an adversary."
+But defaulting to off does not make it an "advanced option"; it is the **only
+step that crosses the local structural ceiling**. Decide with this:
+
+| Your situation | CI verification |
+|---|---|
+| Hidden tests only need to stop "glanced at it" unintentional leaks; the implementer is not an adversary | Optional. The four local layers are enough |
+| The implementer might be **determined to bypass** and shares the same OS user as the verifier | **Not optional — required.** Under that threat model every local layer has the ceiling it can't remove (§1) |
+| Verification results feed a costly decision (release, compliance, external commitment) | Strongly recommended — the local run can't prove to a third party that it wasn't tampered with |
+
+In short: **the local setup fits "prevent misreading"; CI fits "prevent an
+adversary."** Different threat models, not a matter of higher vs. lower strength.
+Turning it on doesn't remove the local run; it demotes it to a "second opinion" —
+a disagreement between the two is a suspicious signal, not an environment
+difference (see `implementer-verifier-workflow.md`, Chinese).
+
 ## 2. How it works
 
 ```

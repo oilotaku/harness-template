@@ -152,6 +152,23 @@ def _(tmp: Path):
     assert config_of(tmp)["protection"]["ci_verification"] is True, config_of(tmp)
 
 
+@case("--no-archive 關掉 releases 歸檔（version.archive = false）")
+def _(tmp: Path):
+    (tmp / "app.py").write_text("x = 1\n", encoding="utf-8")
+    result = run_setup(tmp, "--no-archive")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert config_of(tmp)["version"]["archive"] is False, config_of(tmp)["version"]
+
+
+@case("預設保留 releases 歸檔（省略 archive = 開，見 versioning.md §4.5）")
+def _(tmp: Path):
+    (tmp / "app.py").write_text("x = 1\n", encoding="utf-8")
+    result = run_setup(tmp)  # 不加旗標，--yes 走預設 y
+    assert result.returncode == 0, result.stdout + result.stderr
+    # 開啟時刻意不寫出 archive 鍵——省略就是預設開，多寫一個會漂的欄位沒有意義。
+    assert "archive" not in config_of(tmp)["version"], config_of(tmp)["version"]
+
+
 @case("--no-gui 關掉設計檢查；--gui 保留（未確認）")
 def _(tmp: Path):
     a = tmp / "a"; a.mkdir(); (a / "app.py").write_text("x=1\n", encoding="utf-8")
