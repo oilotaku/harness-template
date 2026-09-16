@@ -48,6 +48,17 @@ leak. After sealing, hidden tests are not in the working tree, their contents
 are ciphertext, and decryption needs a token handed only to the verifier. This
 layer is hard, and it relies on nobody's self-discipline.
 
+**What grade of "encryption" this is** (so you don't misuse it): sealing uses a
+SHA-256 keystream XOR (a separate key per file) implemented with the Python
+standard library only — **not AES**. Its threat model is exactly the above —
+stopping unintentional leaks — so it is **misread-prevention grade, not
+confidentiality grade**. Do **not** put genuinely sensitive things (credentials,
+personal data, keys, trade secrets) in hidden tests: that kind of data belongs in
+OS permissions or dedicated secret management, not this vault. For the design
+trade-offs (why not AES, how the two-time-pad is avoided) see
+[`docs/ci-verification.md`](docs/ci-verification.md) §1 and the module docstring
+of `scripts/hidden_vault.py`.
+
 **What it does not block** (the default local setup): a sub-agent that is
 **determined to bypass and shares the same OS user as the verifier**. The token
 passes through Claude Code's transcript; the decrypted plaintext exists on disk

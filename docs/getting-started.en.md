@@ -19,6 +19,20 @@ verification matters more than installation.
 > for those who want to understand **what each step does and how to confirm it** —
 > the wizard runs it for you, this helps you understand it.
 
+> **Feels like a lot?** This template has many scripts and mechanisms, but you
+> only need to confirm **three things** — everything else runs itself:
+>
+> 1. **Is it installed?** → `python3 scripts/init.py` (§2)
+> 2. **Is protection actually live?** (most important) →
+>    `python3 scripts/guard-selfcheck.py`; seeing "protection normal: N/N" is the
+>    goal (§3). This step is the only defense against this template's one truly
+>    fatal failure mode — "looks installed, but protection isn't actually on."
+> 3. **Is the whole thing healthy?** (after changing a mechanism, or a full check)
+>    → run the regression line in §8.
+>
+> Every section beyond those three lines is "help you understand why," not a step
+> you must run every time.
+
 ---
 
 ## 0. Prerequisites
