@@ -12,6 +12,26 @@
 
 （尚無變更）
 
+## [0.2.0] - 2026-09-18
+
+### 新增
+
+- **依用量重置時間的停止／恢復閘門**（`scripts/usage-gate.py`）：Orchestrator 在派
+  下一個 task 前查一次，任一用量視窗（5h／7d）接近門檻（預設 90%）就**停在乾淨的
+  任務邊界**（上一個 task 已 commit），把 `resets_at` 記成 `resume_at`；到重置時間
+  被動自動放行，另附 `--resume-at` 給主動喚醒（cron／at／代管排程）。
+- **用量狀態列腳本**（`scripts/statusline-usage.py`）：把 Claude Code 餵給狀態列的
+  `rate_limits` 寫進 `~/.claude/usage-snapshot.json` 當閘門的資料來源，`rate_limits`
+  缺席時回退讀快取。
+- 用量閘門的 15 案回歸測試（`scripts/test-usage-gate.py`）；接線寫進 `CLAUDE.md` §5、
+  `.claude/agents/orchestrator.md` 派工步驟、`docs/token-strategy.md` §3.7。
+
+### 設計取捨（誠實記載）
+
+- 用量閘門是**最佳化不是安全控制**：拿不到用量資料時 **fail-open（放行並出聲）**，
+  與隱藏測試的 fail-closed 明確區分。超門檻但缺 `resets_at` 的視窗不據此暫停
+  （無法自動恢復）。
+
 ## [0.1.0] - 2026-09-16
 
 首個公開版本。四輪審視全部落地，防作弊機制以「機制取代自律」為核心
@@ -66,5 +86,6 @@ harness-template 自己的版本號放在 `VERSION`，並鏡像於 `README.md`
 > `docs/versioning.md` §6：使用者手上那份不一定是從 tag 裝的。tag 與 Release
 > 是發佈動作的產物，不是版本的真相來源。
 
-[未發佈]: https://github.com/oilotaku/harness-template/compare/v0.1.0...HEAD
+[未發佈]: https://github.com/oilotaku/harness-template/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/oilotaku/harness-template/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/oilotaku/harness-template/releases/tag/v0.1.0
