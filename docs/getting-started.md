@@ -323,10 +323,11 @@ python3 scripts/test-guards.py && python3 scripts/test-locks.py \
   && python3 scripts/test-timing.py && python3 scripts/test-skills.py \
   && python3 scripts/test-attempts.py && python3 scripts/test-version.py \
   && python3 scripts/test-design.py && python3 scripts/test-ci-verify.py \
-  && python3 scripts/test-protection-levels.py && python3 scripts/test-setup.py
+  && python3 scripts/test-protection-levels.py && python3 scripts/test-setup.py \
+  && python3 scripts/test-usage-gate.py
 ```
 
-十四組、466 個案例應該全數通過。這也是最快的「我裝完整了嗎」檢查。
+十五組、483 個案例應該全數通過。這也是最快的「我裝完整了嗎」檢查。
 
 ---
 

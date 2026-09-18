@@ -316,6 +316,52 @@ implementer 就讀得到，隱藏測試立刻退化成可以反覆查詢的 orac
 
 ---
 
+### 3.7 根據重置時間的停止／恢復（用量閘門）
+
+§3.1 說「撞上限的代價是複利的」——mid-task 被砍、進度沒 commit、重載固定開銷。
+與其等著撞牆，不如**在乾淨的任務邊界主動停**，到重置時間再恢復。這就是
+`scripts/usage-gate.py` 做的事。
+
+**資料來源**：狀態列腳本 `scripts/statusline-usage.py` 把 Claude Code 餵給狀態列的
+`rate_limits`（5h／7d 的 `used_percentage` 與 `resets_at`）寫進
+`~/.claude/usage-snapshot.json`。啟用方式見那支腳本的模組說明（在 `~/.claude/settings.json`
+設一個 `statusLine` 命令）。
+
+**停止＝任務邊界，不是 mid-task 強停**。Orchestrator 在派下一個 task 前查一次：
+
+```bash
+python3 scripts/usage-gate.py --check     # exit 0 放行；exit 2 該停
+```
+
+任一視窗用量 ≥ 門檻（預設 90%，可用 `--threshold` 或 `HARNESS_USAGE_THRESHOLD` 改）
+就停在這個邊界——**此時上一個 task 已經 commit（§3.3），停下來零損失**——並把
+`resume_at`（取自 `resets_at`）寫進 `.harness/usage-pause.json`。這正是不在
+`PreToolUse` 層硬攔的原因：那會 mid-task 打斷、丟掉未 commit 的進度，等於自己製造
+§3.1 的複利成本。
+
+**恢復**分兩種，由環境決定用哪個：
+
+| 方式 | 怎麼運作 | 適用 |
+|---|---|---|
+| **被動**（預設） | 下次 `--check` 時 `now >= resume_at` 就自動放行並清掉暫停檔 | 所有環境，不依賴任何排程器 |
+| **主動**（選配） | 拿 `--check` 印出的 `--resume-at <epoch>` 去掛排程，時間到自動喚醒續跑 | 本機用 `at`/`cron`；代管環境用它自己的排程 |
+
+主動喚醒的本機範例（Linux／macOS）：
+
+```bash
+# usage-gate 會在該停時印出一行 "--resume-at <epoch>"
+at "$(date -d @<epoch> +%H:%M)" <<< 'cd /path/to/project && echo 用量已重置，可續跑'
+```
+
+**為什麼這裡 fail-open（跟隱藏測試相反）**：用量閘門是最佳化，不是安全控制。
+拿不到用量資料（非 Pro/Max、還沒發第一次 API 回應、快照壞掉）時**放行並出聲**，
+而不是 fail-closed——沒有用量資料就擋掉所有工作，比偶爾多跑一個 task 更糟。
+安全相關的 fail-closed 只留給「看不到就等於防護失效」的地方（隱藏測試、設定檔）。
+
+> ⚠️ 超過門檻但快照裡那個視窗**沒有 `resets_at`** 時，閘門不會據此暫停——因為
+> 沒有重置時間就無法自動恢復，硬停會變成停在那裡出不來。這種情況它會放行但出聲，
+> 由人決定要不要手動停。
+
 ## 4. 絕對不該省的地方
 
 省 token 很容易滑坡成「把防線拆掉」。以下幾項省下來的錢，

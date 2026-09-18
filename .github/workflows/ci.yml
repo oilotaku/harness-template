@@ -92,6 +92,9 @@ jobs:
       - name: 設定精靈回歸測試（偵測語言、產生的設定一定通過驗證、不靜默覆蓋）
         run: python scripts/test-setup.py
 
+      - name: 用量停止／恢復閘門回歸測試（超門檻停在邊界、到重置時間恢復、無資料 fail-open）
+        run: python scripts/test-usage-gate.py
+
       - name: 模板自己附的設計 token 必須達 WCAG AA
         run: python scripts/check-design-tokens.py
 
@@ -116,6 +119,7 @@ jobs:
           python -X utf8=0 scripts/test-ci-verify.py
           python -X utf8=0 scripts/test-protection-levels.py
           python -X utf8=0 scripts/test-setup.py
+          python -X utf8=0 scripts/test-usage-gate.py
 
       - name: 範例流程仍可重跑
         working-directory: templates/examples/demo-fizzbuzz
