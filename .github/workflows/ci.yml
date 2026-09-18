@@ -95,6 +95,9 @@ jobs:
       - name: 用量停止／恢復閘門回歸測試（超門檻停在邊界、到重置時間恢復、無資料 fail-open）
         run: python scripts/test-usage-gate.py
 
+      - name: releases 歸檔回歸測試（產出專案端：歸檔照設定發生、隱藏測試一律排除）
+        run: python scripts/test-release-archive.py
+
       - name: 模板自己附的設計 token 必須達 WCAG AA
         run: python scripts/check-design-tokens.py
 
@@ -120,6 +123,7 @@ jobs:
           python -X utf8=0 scripts/test-protection-levels.py
           python -X utf8=0 scripts/test-setup.py
           python -X utf8=0 scripts/test-usage-gate.py
+          python -X utf8=0 scripts/test-release-archive.py
 
       - name: 範例流程仍可重跑
         working-directory: templates/examples/demo-fizzbuzz

@@ -309,10 +309,10 @@ python3 scripts/test-guards.py && python3 scripts/test-locks.py \
   && python3 scripts/test-attempts.py && python3 scripts/test-version.py \
   && python3 scripts/test-design.py && python3 scripts/test-ci-verify.py \
   && python3 scripts/test-protection-levels.py && python3 scripts/test-setup.py \
-  && python3 scripts/test-usage-gate.py
+  && python3 scripts/test-usage-gate.py && python3 scripts/test-release-archive.py
 ```
 
-這十五組（共 **483 個案例**）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
+這十六組（共 **488 個案例**）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
 六種組合上自動執行，Linux 另外多跑一輪 `LC_ALL=C`（非 UTF-8 locale）
 （見 `.github/workflows/ci.yml`）。
 
