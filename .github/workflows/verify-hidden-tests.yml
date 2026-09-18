@@ -74,7 +74,7 @@ jobs:
       - name: 上傳加密的驗收明細
         # 驗收失敗時更需要這份明細，所以 always()。
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: hidden-test-report
           # 只上傳加密明細。artifact 任何有 repo 讀取權的人都下載得到，
