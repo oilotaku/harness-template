@@ -42,6 +42,11 @@
       "Bash(python3 scripts/test-attempts.py)",
       "Bash(python3 scripts/test-version.py)",
       "Bash(python3 scripts/test-design.py)",
+      "Bash(python3 scripts/usage-gate.py)",
+      "Bash(python3 scripts/usage-gate.py:*)",
+      "Bash(python3 scripts/statusline-usage.py)",
+      "Bash(python3 scripts/statusline-usage.py:*)",
+      "Bash(python3 scripts/test-usage-gate.py)",
       "Bash(python3 scripts/guard-selfcheck.py:*)"
     ],
     "deny": [

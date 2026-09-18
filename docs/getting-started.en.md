@@ -366,10 +366,11 @@ python3 scripts/test-guards.py && python3 scripts/test-locks.py \
   && python3 scripts/test-timing.py && python3 scripts/test-skills.py \
   && python3 scripts/test-attempts.py && python3 scripts/test-version.py \
   && python3 scripts/test-design.py && python3 scripts/test-ci-verify.py \
-  && python3 scripts/test-protection-levels.py && python3 scripts/test-setup.py
+  && python3 scripts/test-protection-levels.py && python3 scripts/test-setup.py \
+  && python3 scripts/test-usage-gate.py
 ```
 
-Fourteen suites, 466 cases, should all pass. This is also the fastest "did I
+Fifteen suites, 483 cases, should all pass. This is also the fastest "did I
 install it completely" check.
 
 ---

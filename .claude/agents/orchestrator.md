@@ -150,6 +150,11 @@ frontmatter 的 `thinking` 欄位**不會被 Claude Code 讀取**，它只是本
    - 依任務複雜度、風險等級，替每個 task 標註要用哪個模型、思考層級多高。
 
 6. **派工（檢驗者必須先於實作者）**
+   - **派下一個 task 前先查用量閘門**（`python3 scripts/usage-gate.py --check`）：
+     exit 2 代表某個用量視窗接近上限，**停在這個乾淨的任務邊界**（上一個 task 已
+     commit），把它印出的重置時間告訴使用者，到重置時間後再繼續（被動恢復；要主動
+     喚醒見 `docs/token-strategy.md` §3.7）。exit 0 就照常派工。閘門在拿不到用量
+     資料時 fail-open（放行），所以沒有 Pro/Max 用量資料的專案不受影響。
    - 對每個 task：先指派給對應的 `verifier-test-writer`，
      等隱藏測試封存（`seal-hidden-tests.py`，會一併鎖定公開測試、並把驗收用的程式碼一起封存）與基線執行（封存版 runner 加 `--baseline`，證明測試在沒有實作時是紅的）
      完成後，才把 task-spec + 公開測試交給對應的 `implementer-*`。

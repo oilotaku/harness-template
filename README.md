@@ -283,6 +283,7 @@ python3 scripts/setup.py                     # 設定精靈：偵測語言、產
 | `scripts/skill_policy.py` / `scripts/suggest-skills.py` | 依專案目標決定要安裝哪些 skill；強制「檢驗者拿不到會產生程式碼的 skill」 | 派工前 |
 | `scripts/attempts.py` / `scripts/show-attempts.py` | 驗收嘗試次數與停損判斷；次數由 runner 寫入，不靠 implementer 自我申報 | 驗收後、決定是否再派一輪時 |
 | `scripts/design_tokens.py` / `scripts/check-design-tokens.py` | 前端／GUI 的設計基準：驗 token 結構，並對明暗兩套逐組算 WCAG AA 對比度。設計好不好看驗不了，但「讀不讀得到」算得出來 | 前端 task 驗收時、改過任何顏色之後 |
+| `scripts/statusline-usage.py` / `scripts/usage-gate.py` | 依用量重置時間的停止／恢復：狀態列腳本把 5h／7d 用量寫進 `~/.claude/usage-snapshot.json`，閘門在派工邊界查——接近上限就停在乾淨的邊界、記下重置時間，到點自動放行（fail-open，見 `docs/token-strategy.md` §3.7） | 派下一個 task 前 |
 
 三個共通的設計原則（三支腳本各自的說明裡都有詳述）：
 
@@ -306,10 +307,11 @@ python3 scripts/test-guards.py && python3 scripts/test-locks.py \
   && python3 scripts/test-timing.py && python3 scripts/test-skills.py \
   && python3 scripts/test-attempts.py && python3 scripts/test-version.py \
   && python3 scripts/test-design.py && python3 scripts/test-ci-verify.py \
-  && python3 scripts/test-protection-levels.py && python3 scripts/test-setup.py
+  && python3 scripts/test-protection-levels.py && python3 scripts/test-setup.py \
+  && python3 scripts/test-usage-gate.py
 ```
 
-這十四組（共 **466 個案例**）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
+這十五組（共 **483 個案例**）也會由 CI 在 **Linux / macOS / Windows × Python 3.9 / 3.13**
 六種組合上自動執行，Linux 另外多跑一輪 `LC_ALL=C`（非 UTF-8 locale）
 （見 `.github/workflows/ci.yml`）。
 

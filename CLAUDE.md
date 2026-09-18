@@ -153,7 +153,10 @@ harness-template/
    （等待 → session 斷掉 → 重載固定開銷 → 更快撞下一次），所以在這類方案下
    **預設序列執行**（`machine-profile.py` 給的是機器容量上限，不是建議值），
    每個 task 做完就 commit，並把跨 session 需要的進度寫進
-   `.harness/progress/<task_id>.md`，讓恢復成本是「讀一個小檔案」。
+   `.harness/progress/<task_id>.md`，讓恢復成本是「讀一個小檔案」。與其等著撞牆，
+   Orchestrator 在派下一個 task 前查一次用量閘門（`scripts/usage-gate.py --check`）：
+   接近上限就**停在乾淨的任務邊界**（上一個 task 已 commit），記下重置時間，
+   到點自動放行。細節與啟用方式見 `docs/token-strategy.md` §3.7。
 
 完整的量測數據、訂閱制下的速率與可恢復性策略、不該省的清單、
 以及「平行度不省 token」這個常見誤解，見 `docs/token-strategy.md`。
