@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/oilotaku/harness-template/actions/workflows/ci.yml/badge.svg)](https://github.com/oilotaku/harness-template/actions/workflows/ci.yml)
 
-**版本**：0.1.0
+**版本**：0.2.0
 
 一個給 Claude Code（或任何支援 sub-agent 的 AI 開發流程）使用的**基本開發框架**，
 用來把「一個模糊的需求」變成「多個可獨立驗收、互相制衡的子任務」。
@@ -129,9 +129,10 @@ git clone <repo-url> && cd <你的專案>       # 或把 harness-template/ 內�
 python3 scripts/setup.py                     # 設定精靈：偵測語言、產生設定、建版本號
 ```
 
-`setup.py` 會偵測你的語言（Python / Node / Go / Rust）、問兩個真正需要你決定的
-問題（保護等級、要不要 CI 驗收），產生 `harness.config.json`，最後**印出你的
-下一個指令**——照著貼上就能跑通第一次 seal→verify。不想被問，加 `--yes` 全用預設。
+`setup.py` 會偵測你的語言（Python / Node / Go / Rust）、問幾個真正需要你決定的
+問題（保護等級、要不要 CI 驗收、有沒有圖形介面、releases 歸檔），產生
+`harness.config.json`，最後**印出你的下一個指令**——照著貼上就能跑通第一次
+seal→verify。不想被問，加 `--yes` 全用預設。
 
 想先看它整套跑一次而不動到你的專案：`templates/examples/demo-fizzbuzz/`。
 

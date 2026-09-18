@@ -176,11 +176,12 @@ git clone <repo-url> && cd <your-project>   # or copy harness-template/ contents
 python3 scripts/setup.py                     # setup wizard: detect language, generate config, init version
 ```
 
-`setup.py` detects your language (Python / Node / Go / Rust), asks the two
+`setup.py` detects your language (Python / Node / Go / Rust), asks the few
 questions that genuinely need your decision (protection level, whether to use CI
-verification), generates `harness.config.json`, and finally **prints your next
-command** — paste it and you run your first seal→verify. Don't want to be asked?
-Add `--yes` to use all defaults.
+verification, whether there's a GUI, releases archiving), generates
+`harness.config.json`, and finally **prints your next command** — paste it and
+you run your first seal→verify. Don't want to be asked? Add `--yes` to use all
+defaults.
 
 Want to watch it run end to end without touching your project:
 `templates/examples/demo-fizzbuzz/`.
