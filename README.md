@@ -285,6 +285,7 @@ seal→verify。不想被問，加 `--yes` 全用預設。
 | `scripts/attempts.py` / `scripts/show-attempts.py` | 驗收嘗試次數與停損判斷；次數由 runner 寫入，不靠 implementer 自我申報 | 驗收後、決定是否再派一輪時 |
 | `scripts/design_tokens.py` / `scripts/check-design-tokens.py` | 前端／GUI 的設計基準：驗 token 結構，並對明暗兩套逐組算 WCAG AA 對比度。設計好不好看驗不了，但「讀不讀得到」算得出來 | 前端 task 驗收時、改過任何顏色之後 |
 | `scripts/statusline-usage.py` / `scripts/usage-gate.py` | 依用量重置時間的停止／恢復：狀態列腳本把 5h／7d 用量寫進 `~/.claude/usage-snapshot.json`，閘門在派工邊界查——接近上限就停在乾淨的邊界、記下重置時間，到點自動放行（fail-open，見 `docs/token-strategy.md` §3.7） | 派下一個 task 前 |
+| `scripts/test-release-archive.py` | 產出專案端 `releases/` 歸檔的**回歸測試**（不是決策工具本身，列在這裡方便一起看）：驗歸檔照設定發生／不發生、自訂 `dir`、拒絕覆蓋，以及**隱藏測試暫存區一律排除**（進歸檔＝洩題）| 改動 `release_archive.py` / `version.py` 後、CI 每次 |
 
 三個共通的設計原則（三支腳本各自的說明裡都有詳述）：
 
